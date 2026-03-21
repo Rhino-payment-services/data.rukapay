@@ -337,10 +337,24 @@ export function DashboardClient() {
               sublabel="% of transaction attempts that completed successfully (0–100)"
               value={`${fmtMoney(overview.success_rate)}%`}
             />
-            <KpiCard label="Total fee revenue" sublabel="all fee components on successful txs" value={fmtMoney(overview.total_fee_revenue)} />
+            <KpiCard
+              label="Total fees charged"
+              sublabel="Sum of fee + rukapayFee + thirdParty + network + processing + compliance + governmentTax (successful txs)"
+              value={fmtMoney(overview.total_fee_revenue)}
+            />
+            <KpiCard
+              label="Base tariff fee"
+              sublabel="Sum of transactions.fee (successful txs)"
+              value={fmtMoney(overview.base_fee_revenue)}
+            />
+            <KpiCard
+              label="Partner / network / tax fees"
+              sublabel="thirdParty + network + processing + compliance + governmentTax (successful txs)"
+              value={fmtMoney(overview.partner_fee_revenue)}
+            />
             <KpiCard
               label="RukaPay fee revenue"
-              sublabel="platform fee (rukapayFee) on successful txs"
+              sublabel="Platform fee only (rukapayFee) on successful txs — subset of total fees charged"
               value={fmtMoney(overview.rukapay_fee_revenue)}
             />
             <KpiCard
