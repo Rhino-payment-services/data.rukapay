@@ -163,12 +163,7 @@ export function TimeseriesLineChart({
     const tipBorder = hslVar("--border");
 
     const tip = focus.append("g").attr("class", "focus-tip");
-    tip.append("rect")
-      .attr("class", "tip-bg")
-      .attr("rx", 6)
-      .attr("fill", tipBg)
-      .attr("stroke", tipBorder)
-      .attr("stroke-width", 1);
+    tip.append("rect").attr("class", "tip-bg").attr("rx", 6).attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
     const tipDate = tip.append("text").attr("class", "tip-date").attr("fill", tipFg).style("font-size", "11px");
     const tipVal = tip.append("text").attr("class", "tip-val").attr("fill", tipFg).style("font-size", "12px").style("font-weight", "600");
 
@@ -181,7 +176,7 @@ export function TimeseriesLineChart({
 
     overlay
       .on("mousemove", function (event) {
-        const [mx] = d3.pointer(event, this);
+        const [mx, my] = d3.pointer(event, this);
         if (mx < 0 || mx > innerW) return;
         const x0 = x.invert(mx);
         const i = bisect(parsed, x0, 1);
@@ -202,17 +197,22 @@ export function TimeseriesLineChart({
         const pad = 8;
         const line1 = tipDate.node() as SVGTextElement;
         const line2 = tipVal.node() as SVGTextElement;
+        tipDate.attr("x", pad).attr("y", 14);
+        tipVal.attr("x", pad).attr("y", 30);
         const w1 = line1.getComputedTextLength?.() ?? line1.getBBox().width;
         const w2 = line2.getComputedTextLength?.() ?? line2.getBBox().width;
-        const tw = Math.max(w1, w2, 80);
+        const tw = Math.max(w1, w2) + pad * 2;
         const th = 36;
-        let tx = cx + 12;
-        let ty = cy - 44;
-        if (tx + tw + pad * 2 > innerW - 4) tx = Math.max(4, cx - tw - pad * 2 - 20);
-        if (ty < 4) ty = cy + 16;
-        tipDate.attr("x", tx + pad).attr("y", ty + 14);
-        tipVal.attr("x", tx + pad).attr("y", ty + 28);
-        tip.select("rect.tip-bg").attr("x", tx).attr("y", ty).attr("width", tw + pad * 2).attr("height", th);
+        tip.select("rect.tip-bg").attr("width", tw).attr("height", th);
+
+        // Tooltip follows pointer (stay inside plot)
+        let tx = mx + 10;
+        let ty = my - th - 6;
+        if (tx + tw > innerW - 2) tx = mx - tw - 10;
+        if (tx < 2) tx = 2;
+        if (ty < 2) ty = my + 10;
+        if (ty + th > innerH - 2) ty = innerH - th - 2;
+        tip.attr("transform", `translate(${tx},${ty})`);
       })
       .on("mouseleave", () => {
         focus.style("display", "none");

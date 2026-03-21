@@ -431,7 +431,7 @@ export function DashboardClient() {
                 <CardDescription className="text-xs">TPV per channel</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4">
-                <ChannelBarChart data={channels.items} height={200} />
+                <ChannelBarChart data={channels.items} height={220} />
               </CardContent>
             </Card>
           ) : null}

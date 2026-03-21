@@ -106,6 +106,103 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
       row.append("line").attr("x1", 0).attr("x2", 18).attr("y1", 0).attr("y2", 0).attr("stroke", item.color).attr("stroke-width", 2.5);
       row.append("text").attr("x", 22).attr("y", 4).text(item.label).style("fill", muted).style("font-size", "11px");
     });
+
+    const bisect = d3.bisector((d: (typeof parsed)[0]) => d.date).left;
+    const dateFmt = d3.timeFormat("%b %d, %Y");
+    const fmtInt = (n: number) => d3.format(",.0f")(n);
+
+    const tipBg = hslVar("--popover");
+    const tipFg = hslVar("--popover-foreground");
+    const tipBorder = hslVar("--border");
+
+    const focus = g.append("g").attr("class", "wallet-focus").style("display", "none").style("pointer-events", "none");
+
+    focus
+      .append("line")
+      .attr("class", "wallet-focus-line")
+      .attr("y1", 0)
+      .attr("y2", innerH)
+      .attr("stroke", hslVar("--border"))
+      .attr("stroke-width", 1)
+      .attr("stroke-dasharray", "4 3");
+
+    focus
+      .append("circle")
+      .attr("class", "dot-personal")
+      .attr("r", 5)
+      .attr("fill", strokePersonal)
+      .attr("stroke", hslVar("--background"))
+      .attr("stroke-width", 2);
+
+    focus
+      .append("circle")
+      .attr("class", "dot-merchant")
+      .attr("r", 5)
+      .attr("fill", strokeMerchant)
+      .attr("stroke", hslVar("--background"))
+      .attr("stroke-width", 2);
+
+    const tip = focus.append("g").attr("class", "wallet-tip");
+    tip.append("rect").attr("rx", 6).attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
+    const t1 = tip.append("text").attr("fill", tipFg).style("font-size", "11px").style("font-weight", "600");
+    const t2 = tip.append("text").attr("fill", tipFg).style("font-size", "11px");
+    const t3 = tip.append("text").attr("fill", tipFg).style("font-size", "11px").style("font-weight", "500");
+
+    const pad = 8;
+    const lineH = 18;
+
+    const overlay = g
+      .append("rect")
+      .attr("width", innerW)
+      .attr("height", innerH)
+      .attr("fill", "transparent")
+      .style("cursor", "crosshair");
+
+    overlay
+      .on("mousemove", function (event) {
+        const [mx, my] = d3.pointer(event, this);
+        if (mx < 0 || mx > innerW) return;
+        const x0 = x.invert(mx);
+        const i = bisect(parsed, x0, 1);
+        const d0 = parsed[Math.max(0, i - 1)];
+        const d1 = parsed[Math.min(parsed.length - 1, i)];
+        const d = x0.getTime() - d0.date.getTime() > d1.date.getTime() - x0.getTime() ? d1 : d0;
+
+        const cx = x(d.date);
+        const cyp = y(d.personal);
+        const cym = y(d.merchant);
+
+        focus.style("display", null);
+        focus.select(".wallet-focus-line").attr("x1", cx).attr("x2", cx);
+        focus.select(".dot-personal").attr("cx", cx).attr("cy", cyp);
+        focus.select(".dot-merchant").attr("cx", cx).attr("cy", cym);
+
+        t1.text(dateFmt(d.date));
+        t2.text(`Personal: ${fmtInt(d.personal)} new`);
+        t3.text(`Merchant (business): ${fmtInt(d.merchant)} new`);
+
+        t1.attr("x", pad).attr("y", 14);
+        t2.attr("x", pad).attr("y", 14 + lineH);
+        t3.attr("x", pad).attr("y", 14 + lineH * 2);
+
+        const w1 = (t1.node() as SVGTextElement).getComputedTextLength();
+        const w2 = (t2.node() as SVGTextElement).getComputedTextLength();
+        const w3 = (t3.node() as SVGTextElement).getComputedTextLength();
+        const tw = Math.max(w1, w2, w3) + pad * 2;
+        const th = 58;
+        tip.select("rect").attr("width", tw).attr("height", th);
+
+        let tx = mx + 10;
+        let ty = my - th - 6;
+        if (tx + tw > innerW - 2) tx = mx - tw - 10;
+        if (tx < 2) tx = 2;
+        if (ty < 2) ty = my + 10;
+        if (ty + th > innerH - 2) ty = innerH - th - 2;
+        tip.attr("transform", `translate(${tx},${ty})`);
+      })
+      .on("mouseleave", () => {
+        focus.style("display", "none");
+      });
   }, [data, height]);
 
   return (
