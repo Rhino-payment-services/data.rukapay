@@ -130,6 +130,93 @@ export function TimeseriesLineChart({
     g.append("g").call(yAxis).selectAll("text").style("fill", muted);
 
     g.selectAll(".domain, .tick line").style("stroke", hslVar("--border"));
+
+    const dateFmt = d3.timeFormat("%b %d, %Y");
+    const valueFmt =
+      metric === "tpv"
+        ? (v: number) => d3.format(",.2f")(v)
+        : (v: number) => d3.format(",.0f")(v);
+
+    const bisect = d3.bisector((d: (typeof parsed)[0]) => d.date).left;
+
+    const focus = g.append("g").attr("class", "focus").style("display", "none").style("pointer-events", "none");
+
+    focus
+      .append("line")
+      .attr("class", "focus-line")
+      .attr("y1", 0)
+      .attr("y2", innerH)
+      .attr("stroke", hslVar("--border"))
+      .attr("stroke-width", 1)
+      .attr("stroke-dasharray", "4 3");
+
+    focus
+      .append("circle")
+      .attr("class", "focus-dot")
+      .attr("r", 5)
+      .attr("fill", lineStroke)
+      .attr("stroke", hslVar("--background"))
+      .attr("stroke-width", 2);
+
+    const tipBg = hslVar("--popover");
+    const tipFg = hslVar("--popover-foreground");
+    const tipBorder = hslVar("--border");
+
+    const tip = focus.append("g").attr("class", "focus-tip");
+    tip.append("rect")
+      .attr("class", "tip-bg")
+      .attr("rx", 6)
+      .attr("fill", tipBg)
+      .attr("stroke", tipBorder)
+      .attr("stroke-width", 1);
+    const tipDate = tip.append("text").attr("class", "tip-date").attr("fill", tipFg).style("font-size", "11px");
+    const tipVal = tip.append("text").attr("class", "tip-val").attr("fill", tipFg).style("font-size", "12px").style("font-weight", "600");
+
+    const overlay = g
+      .append("rect")
+      .attr("width", innerW)
+      .attr("height", innerH)
+      .attr("fill", "transparent")
+      .style("cursor", "crosshair");
+
+    overlay
+      .on("mousemove", function (event) {
+        const [mx] = d3.pointer(event, this);
+        if (mx < 0 || mx > innerW) return;
+        const x0 = x.invert(mx);
+        const i = bisect(parsed, x0, 1);
+        const d0 = parsed[Math.max(0, i - 1)];
+        const d1 = parsed[Math.min(parsed.length - 1, i)];
+        const d = x0.getTime() - d0.date.getTime() > d1.date.getTime() - x0.getTime() ? d1 : d0;
+
+        const cx = x(d.date);
+        const cy = y(d.value);
+        focus.style("display", null);
+        focus.select(".focus-line").attr("x1", cx).attr("x2", cx);
+        focus.select(".focus-dot").attr("cx", cx).attr("cy", cy);
+
+        const label = metric === "tpv" ? "TPV" : "Count";
+        tipDate.text(dateFmt(d.date));
+        tipVal.text(`${label}: ${valueFmt(d.value)}`);
+
+        const pad = 8;
+        const line1 = tipDate.node() as SVGTextElement;
+        const line2 = tipVal.node() as SVGTextElement;
+        const w1 = line1.getComputedTextLength?.() ?? line1.getBBox().width;
+        const w2 = line2.getComputedTextLength?.() ?? line2.getBBox().width;
+        const tw = Math.max(w1, w2, 80);
+        const th = 36;
+        let tx = cx + 12;
+        let ty = cy - 44;
+        if (tx + tw + pad * 2 > innerW - 4) tx = Math.max(4, cx - tw - pad * 2 - 20);
+        if (ty < 4) ty = cy + 16;
+        tipDate.attr("x", tx + pad).attr("y", ty + 14);
+        tipVal.attr("x", tx + pad).attr("y", ty + 28);
+        tip.select("rect.tip-bg").attr("x", tx).attr("y", ty).attr("width", tw + pad * 2).attr("height", th);
+      })
+      .on("mouseleave", () => {
+        focus.style("display", "none");
+      });
   }, [data, height, metric, targetReference]);
 
   const aria =

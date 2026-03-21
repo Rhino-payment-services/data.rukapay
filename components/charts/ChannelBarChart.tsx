@@ -13,7 +13,7 @@ export function ChannelBarChart({ data, height = 220 }: { data: Row[]; height?: 
   useEffect(() => {
     if (!ref.current || !data.length) return;
 
-    const margin = { top: 16, right: 16, bottom: 56, left: 48 };
+    const margin = { top: 16, right: 16, bottom: 56, left: 52 };
     const width = ref.current.parentElement?.clientWidth ?? 600;
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
@@ -47,15 +47,51 @@ export function ChannelBarChart({ data, height = 220 }: { data: Row[]; height?: 
       .range(palette);
     const muted = hslVar("--muted-foreground");
 
-    g.selectAll("rect")
+    const tipBg = hslVar("--popover");
+    const tipFg = hslVar("--popover-foreground");
+    const tipBorder = hslVar("--border");
+
+    const tooltip = g.append("g").attr("class", "bar-tooltip").style("opacity", 0).style("pointer-events", "none");
+    tooltip.append("rect").attr("rx", 6).attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
+    const tipCh = tooltip.append("text").attr("fill", tipFg).style("font-size", "11px");
+    const tipAmt = tooltip.append("text").attr("fill", tipFg).style("font-size", "12px").style("font-weight", "600");
+
+    const fmtMoney = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    g.selectAll("rect.bar")
       .data(rows)
       .join("rect")
+      .attr("class", "bar")
       .attr("x", (d) => x(d.channel) ?? 0)
       .attr("y", (d) => y(d.tpv))
       .attr("width", x.bandwidth())
       .attr("height", (d) => innerH - y(d.tpv))
       .attr("rx", 4)
-      .attr("fill", (d) => color(d.channel));
+      .attr("fill", (d) => color(d.channel))
+      .style("cursor", "pointer")
+      .on("mouseenter", function (_event, d) {
+        const bx = (x(d.channel) ?? 0) + x.bandwidth() / 2;
+        const by = y(d.tpv);
+        tipCh.text(d.channel);
+        tipAmt.text(fmtMoney(d.tpv));
+        const pad = 8;
+        const w1 = (tipCh.node() as SVGTextElement).getComputedTextLength();
+        const w2 = (tipAmt.node() as SVGTextElement).getComputedTextLength();
+        const tw = Math.max(w1, w2, 72) + pad * 2;
+        const th = 38;
+        let tx = bx - tw / 2;
+        if (tx < 4) tx = 4;
+        if (tx + tw > innerW - 4) tx = innerW - tw - 4;
+        let ty = by - th - 8;
+        if (ty < 4) ty = by + 8;
+        tooltip.select("rect").attr("x", tx).attr("y", ty).attr("width", tw).attr("height", th);
+        tipCh.attr("x", tx + pad).attr("y", ty + 15);
+        tipAmt.attr("x", tx + pad).attr("y", ty + 30);
+        tooltip.style("opacity", 1);
+      })
+      .on("mouseleave", () => {
+        tooltip.style("opacity", 0);
+      });
 
     g.append("g")
       .attr("transform", `translate(0,${innerH})`)
