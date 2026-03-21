@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "RukaPay Executive Analytics",
-  description: "Internal executive dashboard — data.rukapay",
+  description: "Internal executive dashboard — data.rukapay.co.ug",
   robots: "noindex, nofollow",
 };
 
