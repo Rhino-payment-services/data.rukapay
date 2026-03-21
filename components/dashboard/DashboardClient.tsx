@@ -34,6 +34,9 @@ import { loadTxTargets, saveTxTargets } from "@/lib/transaction-targets-storage"
 /** All analytics requests use Kampala (EAT); matches data_service default. */
 const EXEC_ANALYTICS_TIMEZONE = "Africa/Kampala" as const;
 
+/** Auto-refresh visible tab data so KPIs and charts stay current without a manual reload. */
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -205,6 +208,20 @@ export function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally tab-only; loaders close over latest filters
   }, [tab]);
 
+  // Keep numbers current while the dashboard stays open (uses the same loaders as Apply for the active tab).
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (tab === "overview") void loadOverview();
+      else if (tab === "transactions") void loadTransactions();
+      else if (tab === "users") void loadUsers();
+      else if (tab === "wallets") void loadWallets();
+      else if (tab === "merchants") void loadMerchants();
+    };
+    const id = window.setInterval(tick, AUTO_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [tab, loadOverview, loadTransactions, loadUsers, loadWallets, loadMerchants]);
+
   useEffect(() => {
     const t = loadTxTargets();
     setTxTargetTpvStr(t.tpv);
@@ -260,7 +277,8 @@ export function DashboardClient() {
         </TabsTrigger>
       </TabsList>
       <p className="text-xs text-muted-foreground">
-        Timezone: <span className="font-medium text-foreground/80">Kampala</span> ({EXEC_ANALYTICS_TIMEZONE})
+        Timezone: <span className="font-medium text-foreground/80">Kampala</span> ({EXEC_ANALYTICS_TIMEZONE}) · Active tab
+        refreshes every {AUTO_REFRESH_MS / 60_000} minutes
       </p>
 
       <TabsContent value="overview" className="space-y-6">
