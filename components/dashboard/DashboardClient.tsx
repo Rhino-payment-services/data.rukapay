@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChannelBarChart } from "@/components/charts/ChannelBarChart";
 import { TimeseriesLineChart } from "@/components/charts/TimeseriesLineChart";
@@ -19,8 +19,17 @@ import {
   UsersLoadingSkeleton,
   WalletChartLoadingSkeleton,
 } from "@/components/dashboard/AnalyticsStates";
+import { TransactionTargetsComparison } from "@/components/dashboard/TransactionTargetsComparison";
 import { KpiCard, MetricAbbrev, SegmentMetricLine, ThAbbr } from "@/components/dashboard/MetricAbbrev";
 import { fetchAnalyticsJson } from "@/lib/analytics-fetch";
+import {
+  parseTargetAmount,
+  parseTargetCount,
+  sumTimeseriesTransactionCount,
+  sumTimeseriesTpv,
+  type TimeseriesApiItem,
+} from "@/lib/timeseries-aggregate";
+import { loadTxTargets, saveTxTargets } from "@/lib/transaction-targets-storage";
 
 /** All analytics requests use Kampala (EAT); matches data_service default. */
 const EXEC_ANALYTICS_TIMEZONE = "Africa/Kampala" as const;
@@ -59,11 +68,14 @@ export function DashboardClient() {
   const [txStart, setTxStart] = useState(defaults.start);
   const [txEnd, setTxEnd] = useState(defaults.end);
   const [txGranularity, setTxGranularity] = useState<"day" | "week" | "month">("day");
-  const [timeseries, setTimeseries] = useState<{ items?: { bucket_start: string; tpv: string }[] } | null>(null);
+  const [timeseries, setTimeseries] = useState<{ items?: TimeseriesApiItem[] } | null>(null);
   const [channels, setChannels] = useState<{ items?: { channel: string; tpv: string }[] } | null>(null);
   const [tsError, setTsError] = useState<string | null>(null);
   const [chError, setChError] = useState<string | null>(null);
   const [txLoading, setTxLoading] = useState(false);
+  const [txTargetTpvStr, setTxTargetTpvStr] = useState("");
+  const [txTargetCountStr, setTxTargetCountStr] = useState("");
+  const skipNextTxTargetSave = useRef(true);
 
   /** Users tab */
   const [usStart, setUsStart] = useState(defaults.start);
@@ -114,7 +126,7 @@ export function DashboardClient() {
     tsParams.set("granularity", txGranularity);
 
     const [tsResult, chResult] = await Promise.allSettled([
-      fetchAnalyticsJson<{ items?: { bucket_start: string; tpv: string }[] }>("transactions/timeseries", tsParams),
+      fetchAnalyticsJson<{ items?: TimeseriesApiItem[] }>("transactions/timeseries", tsParams),
       fetchAnalyticsJson<{ items?: { channel: string; tpv: string }[] }>("tpv/by-channel", new URLSearchParams(base)),
     ]);
 
@@ -193,11 +205,48 @@ export function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally tab-only; loaders close over latest filters
   }, [tab]);
 
+  useEffect(() => {
+    const t = loadTxTargets();
+    setTxTargetTpvStr(t.tpv);
+    setTxTargetCountStr(t.transactionCount);
+  }, []);
+
+  useEffect(() => {
+    if (skipNextTxTargetSave.current) {
+      skipNextTxTargetSave.current = false;
+      return;
+    }
+    saveTxTargets({ tpv: txTargetTpvStr, transactionCount: txTargetCountStr });
+  }, [txTargetTpvStr, txTargetCountStr]);
+
   const fmtMoney = (v: unknown) => {
     const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
     if (Number.isNaN(n)) return "—";
     return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+
+  const txItems = timeseries?.items ?? [];
+  const txActualTpv = useMemo(() => {
+    const items = timeseries?.items ?? [];
+    return items.length ? sumTimeseriesTpv(items) : null;
+  }, [timeseries?.items]);
+  const txActualCount = useMemo(() => {
+    const items = timeseries?.items ?? [];
+    return items.length ? sumTimeseriesTransactionCount(items) : null;
+  }, [timeseries?.items]);
+  const txBucketCount = txItems.length;
+
+  const tpvTargetPerBucket = useMemo(() => {
+    const t = parseTargetAmount(txTargetTpvStr);
+    if (t == null || txBucketCount <= 0) return null;
+    return t / txBucketCount;
+  }, [txTargetTpvStr, txBucketCount]);
+
+  const countTargetPerBucket = useMemo(() => {
+    const t = parseTargetCount(txTargetCountStr);
+    if (t == null || txBucketCount <= 0) return null;
+    return t / txBucketCount;
+  }, [txTargetCountStr, txBucketCount]);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
@@ -327,6 +376,14 @@ export function DashboardClient() {
             </Button>
           </CardContent>
         </Card>
+        <TransactionTargetsComparison
+          targetTpvInput={txTargetTpvStr}
+          targetCountInput={txTargetCountStr}
+          onTargetTpvChange={setTxTargetTpvStr}
+          onTargetCountChange={setTxTargetCountStr}
+          actualTpv={txActualTpv}
+          actualTxCount={txActualCount}
+        />
         {tsError || chError ? (
           <div className="space-y-2">
             {tsError ? <AnalyticsErrorAlert message={`Volume over time: ${tsError}`} /> : null}
@@ -339,15 +396,36 @@ export function DashboardClient() {
             <Card className="flex flex-col overflow-hidden">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">Volume (TPV)</CardTitle>
-                <CardDescription className="text-xs">Successful tx amounts over time</CardDescription>
+                <CardDescription className="text-xs">Successful tx amounts over time · dashed line = target pace per bucket</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4">
-                <TimeseriesLineChart data={timeseries.items} height={200} />
+                <TimeseriesLineChart
+                  data={timeseries.items}
+                  metric="tpv"
+                  height={200}
+                  targetReference={tpvTargetPerBucket}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+          {timeseries?.items?.length ? (
+            <Card className="flex flex-col overflow-hidden">
+              <CardHeader className="py-3 pb-2 space-y-0">
+                <CardTitle className="font-outfit text-base">Transactions (count)</CardTitle>
+                <CardDescription className="text-xs">Successful transactions per bucket · dashed line = target pace per bucket</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 pb-4">
+                <TimeseriesLineChart
+                  data={timeseries.items}
+                  metric="transaction_count"
+                  height={200}
+                  targetReference={countTargetPerBucket}
+                />
               </CardContent>
             </Card>
           ) : null}
           {channels?.items?.length ? (
-            <Card className="flex flex-col overflow-hidden">
+            <Card className="flex flex-col overflow-hidden lg:col-span-2">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">By channel</CardTitle>
                 <CardDescription className="text-xs">TPV per channel</CardDescription>
