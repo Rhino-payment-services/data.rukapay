@@ -3,6 +3,7 @@
 import * as d3 from "d3";
 import { useEffect, useRef } from "react";
 
+import { timeTickFormatForSpan } from "@/lib/chart-axis-format";
 import { hslVar } from "@/lib/chart-theme";
 
 function num(v: unknown): number {
@@ -24,13 +25,13 @@ export type WalletGrowthPoint = {
  * Personal vs merchant (business) new wallets per bucket — same axes for comparison.
  * Business wallets = non-PERSONAL `walletType` (merchant-linked / business accounts).
  */
-export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrowthPoint[]; height?: number }) {
+export function WalletGrowthLineChart({ data, height = 280 }: { data: WalletGrowthPoint[]; height?: number }) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
     if (!ref.current || !data.length) return;
 
-    const margin = { top: 28, right: 20, bottom: 36, left: 44 };
+    const margin = { top: 32, right: 20, bottom: 52, left: 48 };
     const width = ref.current.parentElement?.clientWidth ?? 600;
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
@@ -70,6 +71,16 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
 
     const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
+    const leg = g.append("g").attr("transform", `translate(0, -6)`);
+    [
+      { label: "Personal", color: strokePersonal, x: 0 },
+      { label: "Merchant (business)", color: strokeMerchant, x: 148 },
+    ].forEach((item) => {
+      const row = leg.append("g").attr("transform", `translate(${item.x}, 0)`);
+      row.append("line").attr("x1", 0).attr("x2", 18).attr("y1", 0).attr("y2", 0).attr("stroke", item.color).attr("stroke-width", 2.5);
+      row.append("text").attr("x", 22).attr("y", 4).text(item.label).style("fill", muted).style("font-size", "11px");
+    });
+
     g.append("path")
       .datum(parsed)
       .attr("fill", "none")
@@ -84,28 +95,21 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
       .attr("stroke-width", 2.5)
       .attr("d", lineMerchant);
 
-    g.append("g")
+    const [tStart, tEnd] = x.domain();
+    const xTickFmt = timeTickFormatForSpan(tStart, tEnd);
+    const xAxisG = g
+      .append("g")
       .attr("transform", `translate(0,${innerH})`)
-      .call(d3.axisBottom(x).ticks(Math.min(6, parsed.length)))
-      .selectAll("text")
-      .style("fill", muted);
+      .call(d3.axisBottom(x).ticks(6).tickFormat(xTickFmt as (d: Date | d3.NumberValue, i: number) => string));
+    xAxisG.selectAll("text").style("fill", muted).style("font-size", "12px").attr("dy", "0.71em");
 
     g.append("g")
       .call(d3.axisLeft(y).ticks(5).tickFormat((v) => d3.format(",.0f")(v as number)))
       .selectAll("text")
-      .style("fill", muted);
+      .style("fill", muted)
+      .style("font-size", "11px");
 
     g.selectAll(".domain, .tick line").style("stroke", hslVar("--border"));
-
-    const leg = g.append("g").attr("transform", `translate(0, -4)`);
-    [
-      { label: "Personal", color: strokePersonal, x: 0 },
-      { label: "Merchant (business)", color: strokeMerchant, x: 128 },
-    ].forEach((item) => {
-      const row = leg.append("g").attr("transform", `translate(${item.x}, 0)`);
-      row.append("line").attr("x1", 0).attr("x2", 18).attr("y1", 0).attr("y2", 0).attr("stroke", item.color).attr("stroke-width", 2.5);
-      row.append("text").attr("x", 22).attr("y", 4).text(item.label).style("fill", muted).style("font-size", "11px");
-    });
 
     const bisect = d3.bisector((d: (typeof parsed)[0]) => d.date).left;
     const dateFmt = d3.timeFormat("%b %d, %Y");
@@ -115,7 +119,18 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
     const tipFg = hslVar("--popover-foreground");
     const tipBorder = hslVar("--border");
 
-    const focus = g.append("g").attr("class", "wallet-focus").style("display", "none").style("pointer-events", "none");
+    const overlay = g
+      .append("rect")
+      .attr("width", innerW)
+      .attr("height", innerH)
+      .attr("fill", "transparent")
+      .style("cursor", "crosshair");
+
+    const focus = g
+      .append("g")
+      .attr("class", "chart-tooltip-layer")
+      .style("opacity", "0")
+      .style("pointer-events", "none");
 
     focus
       .append("line")
@@ -143,20 +158,13 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
       .attr("stroke-width", 2);
 
     const tip = focus.append("g").attr("class", "wallet-tip");
-    tip.append("rect").attr("rx", 6).attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
-    const t1 = tip.append("text").attr("fill", tipFg).style("font-size", "11px").style("font-weight", "600");
+    tip.append("rect").attr("rx", 8).attr("class", "chart-tooltip-shadow").attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
+    const t1 = tip.append("text").attr("fill", tipFg).style("font-size", "12px").style("font-weight", "600");
     const t2 = tip.append("text").attr("fill", tipFg).style("font-size", "11px");
     const t3 = tip.append("text").attr("fill", tipFg).style("font-size", "11px").style("font-weight", "500");
 
-    const pad = 8;
+    const pad = 10;
     const lineH = 18;
-
-    const overlay = g
-      .append("rect")
-      .attr("width", innerW)
-      .attr("height", innerH)
-      .attr("fill", "transparent")
-      .style("cursor", "crosshair");
 
     overlay
       .on("mousemove", function (event) {
@@ -172,7 +180,7 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
         const cyp = y(d.personal);
         const cym = y(d.merchant);
 
-        focus.style("display", null);
+        focus.style("opacity", "1");
         focus.select(".wallet-focus-line").attr("x1", cx).attr("x2", cx);
         focus.select(".dot-personal").attr("cx", cx).attr("cy", cyp);
         focus.select(".dot-merchant").attr("cx", cx).attr("cy", cym);
@@ -181,33 +189,33 @@ export function WalletGrowthLineChart({ data, height = 260 }: { data: WalletGrow
         t2.text(`Personal: ${fmtInt(d.personal)} new`);
         t3.text(`Merchant (business): ${fmtInt(d.merchant)} new`);
 
-        t1.attr("x", pad).attr("y", 14);
-        t2.attr("x", pad).attr("y", 14 + lineH);
-        t3.attr("x", pad).attr("y", 14 + lineH * 2);
+        t1.attr("x", pad).attr("y", 16);
+        t2.attr("x", pad).attr("y", 16 + lineH);
+        t3.attr("x", pad).attr("y", 16 + lineH * 2);
 
         const w1 = (t1.node() as SVGTextElement).getComputedTextLength();
         const w2 = (t2.node() as SVGTextElement).getComputedTextLength();
         const w3 = (t3.node() as SVGTextElement).getComputedTextLength();
         const tw = Math.max(w1, w2, w3) + pad * 2;
-        const th = 58;
+        const th = 60;
         tip.select("rect").attr("width", tw).attr("height", th);
 
-        let tx = mx + 10;
-        let ty = my - th - 6;
-        if (tx + tw > innerW - 2) tx = mx - tw - 10;
-        if (tx < 2) tx = 2;
-        if (ty < 2) ty = my + 10;
-        if (ty + th > innerH - 2) ty = innerH - th - 2;
+        let tx = mx + 12;
+        let ty = my - th - 8;
+        if (tx + tw > innerW - 4) tx = mx - tw - 12;
+        if (tx < 4) tx = 4;
+        if (ty < 4) ty = my + 12;
+        if (ty + th > innerH - 4) ty = innerH - th - 4;
         tip.attr("transform", `translate(${tx},${ty})`);
       })
       .on("mouseleave", () => {
-        focus.style("display", "none");
+        focus.style("opacity", "0");
       });
   }, [data, height]);
 
   return (
-    <div className="w-full overflow-hidden">
-      <svg ref={ref} width="100%" height={height} className="block" role="img" aria-label="Personal and merchant new wallets over time" />
+    <div className="chart-wrap relative w-full min-w-0 isolate z-0 overflow-visible">
+      <svg ref={ref} width="100%" height={height} className="block overflow-visible" role="img" aria-label="Personal and merchant new wallets over time" />
     </div>
   );
 }

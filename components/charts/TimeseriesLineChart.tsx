@@ -3,6 +3,7 @@
 import * as d3 from "d3";
 import { useEffect, useRef } from "react";
 
+import { formatYAxisCompact, timeTickFormatForSpan } from "@/lib/chart-axis-format";
 import { hslVar } from "@/lib/chart-theme";
 import type { TimeseriesApiItem } from "@/lib/timeseries-aggregate";
 
@@ -30,7 +31,7 @@ type TimeseriesLineChartProps = {
 export function TimeseriesLineChart({
   data,
   metric = "tpv",
-  height = 220,
+  height = 280,
   targetReference = null,
 }: TimeseriesLineChartProps) {
   const ref = useRef<SVGSVGElement | null>(null);
@@ -38,7 +39,7 @@ export function TimeseriesLineChart({
   useEffect(() => {
     if (!ref.current || !data.length) return;
 
-    const margin = { top: 22, right: 16, bottom: 36, left: metric === "tpv" ? 56 : 44 };
+    const margin = { top: 24, right: 20, bottom: 56, left: metric === "tpv" ? 62 : 50 };
     const width = ref.current.parentElement?.clientWidth ?? 600;
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
@@ -117,17 +118,23 @@ export function TimeseriesLineChart({
         .text("Target pace / bucket");
     }
 
-    const tickFmt =
+    const [tStart, tEnd] = x.domain();
+    const xTickFmt = timeTickFormatForSpan(tStart, tEnd);
+    const xAxis = d3
+      .axisBottom(x)
+      .ticks(6)
+      .tickFormat(xTickFmt as (d: Date | d3.NumberValue, i: number) => string);
+
+    const yTickFmt =
       metric === "tpv"
-        ? (v: d3.NumberValue) => d3.format(",.0f")(v as number)
+        ? (v: d3.NumberValue) => formatYAxisCompact(v as number)
         : (v: d3.NumberValue) => d3.format(",.0f")(v as number);
 
-    const xAxis = d3.axisBottom(x).ticks(Math.min(8, parsed.length));
-    const yAxis = d3.axisLeft(y).ticks(5).tickFormat(tickFmt);
+    const xAxisG = g.append("g").attr("transform", `translate(0,${innerH})`).call(xAxis);
+    xAxisG.selectAll("text").style("fill", muted).style("font-size", "12px").attr("dy", "0.71em");
 
-    g.append("g").attr("transform", `translate(0,${innerH})`).call(xAxis).selectAll("text").style("fill", muted);
-
-    g.append("g").call(yAxis).selectAll("text").style("fill", muted);
+    const yAxisG = g.append("g").call(d3.axisLeft(y).ticks(5).tickFormat(yTickFmt));
+    yAxisG.selectAll("text").style("fill", muted).style("font-size", "11px");
 
     g.selectAll(".domain, .tick line").style("stroke", hslVar("--border"));
 
@@ -139,7 +146,18 @@ export function TimeseriesLineChart({
 
     const bisect = d3.bisector((d: (typeof parsed)[0]) => d.date).left;
 
-    const focus = g.append("g").attr("class", "focus").style("display", "none").style("pointer-events", "none");
+    const overlay = g
+      .append("rect")
+      .attr("width", innerW)
+      .attr("height", innerH)
+      .attr("fill", "transparent")
+      .style("cursor", "crosshair");
+
+    const focus = g
+      .append("g")
+      .attr("class", "chart-tooltip-layer")
+      .style("opacity", "0")
+      .style("pointer-events", "none");
 
     focus
       .append("line")
@@ -162,17 +180,15 @@ export function TimeseriesLineChart({
     const tipFg = hslVar("--popover-foreground");
     const tipBorder = hslVar("--border");
 
-    const tip = focus.append("g").attr("class", "focus-tip");
-    tip.append("rect").attr("class", "tip-bg").attr("rx", 6).attr("fill", tipBg).attr("stroke", tipBorder).attr("stroke-width", 1);
-    const tipDate = tip.append("text").attr("class", "tip-date").attr("fill", tipFg).style("font-size", "11px");
-    const tipVal = tip.append("text").attr("class", "tip-val").attr("fill", tipFg).style("font-size", "12px").style("font-weight", "600");
-
-    const overlay = g
-      .append("rect")
-      .attr("width", innerW)
-      .attr("height", innerH)
-      .attr("fill", "transparent")
-      .style("cursor", "crosshair");
+    const tip = focus.append("g").attr("class", "chart-tooltip-inner");
+    tip.append("rect")
+      .attr("class", "tip-bg chart-tooltip-shadow")
+      .attr("rx", 8)
+      .attr("fill", tipBg)
+      .attr("stroke", tipBorder)
+      .attr("stroke-width", 1);
+    const tipDate = tip.append("text").attr("class", "tip-date").attr("fill", tipFg).style("font-size", "12px");
+    const tipVal = tip.append("text").attr("class", "tip-val").attr("fill", tipFg).style("font-size", "13px").style("font-weight", "600");
 
     overlay
       .on("mousemove", function (event) {
@@ -186,7 +202,7 @@ export function TimeseriesLineChart({
 
         const cx = x(d.date);
         const cy = y(d.value);
-        focus.style("display", null);
+        focus.style("opacity", "1");
         focus.select(".focus-line").attr("x1", cx).attr("x2", cx);
         focus.select(".focus-dot").attr("cx", cx).attr("cy", cy);
 
@@ -194,28 +210,27 @@ export function TimeseriesLineChart({
         tipDate.text(dateFmt(d.date));
         tipVal.text(`${label}: ${valueFmt(d.value)}`);
 
-        const pad = 8;
+        const pad = 10;
         const line1 = tipDate.node() as SVGTextElement;
         const line2 = tipVal.node() as SVGTextElement;
-        tipDate.attr("x", pad).attr("y", 14);
-        tipVal.attr("x", pad).attr("y", 30);
+        tipDate.attr("x", pad).attr("y", 16);
+        tipVal.attr("x", pad).attr("y", 34);
         const w1 = line1.getComputedTextLength?.() ?? line1.getBBox().width;
         const w2 = line2.getComputedTextLength?.() ?? line2.getBBox().width;
         const tw = Math.max(w1, w2) + pad * 2;
-        const th = 36;
+        const th = 42;
         tip.select("rect.tip-bg").attr("width", tw).attr("height", th);
 
-        // Tooltip follows pointer (stay inside plot)
-        let tx = mx + 10;
-        let ty = my - th - 6;
-        if (tx + tw > innerW - 2) tx = mx - tw - 10;
-        if (tx < 2) tx = 2;
-        if (ty < 2) ty = my + 10;
-        if (ty + th > innerH - 2) ty = innerH - th - 2;
+        let tx = mx + 12;
+        let ty = my - th - 8;
+        if (tx + tw > innerW - 4) tx = mx - tw - 12;
+        if (tx < 4) tx = 4;
+        if (ty < 4) ty = my + 12;
+        if (ty + th > innerH - 4) ty = innerH - th - 4;
         tip.attr("transform", `translate(${tx},${ty})`);
       })
       .on("mouseleave", () => {
-        focus.style("display", "none");
+        focus.style("opacity", "0");
       });
   }, [data, height, metric, targetReference]);
 
@@ -225,8 +240,8 @@ export function TimeseriesLineChart({
       : "Successful transaction count over time";
 
   return (
-    <div className="w-full overflow-hidden">
-      <svg ref={ref} width="100%" height={height} className="block" role="img" aria-label={aria} />
+    <div className="chart-wrap relative w-full min-w-0 isolate z-0 overflow-visible">
+      <svg ref={ref} width="100%" height={height} className="block overflow-visible" role="img" aria-label={aria} />
     </div>
   );
 }
