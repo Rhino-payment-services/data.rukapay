@@ -95,3 +95,28 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* D3 chart tooltips: paint above axes/overlay; z-index where SVG supports it; smooth fade */
+@layer utilities {
+  .chart-wrap {
+    @apply overflow-visible;
+  }
+
+  .chart-tooltip-layer {
+    pointer-events: none;
+    z-index: 9999;
+    isolation: isolate;
+    transition:
+      opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity;
+  }
+
+  .chart-tooltip-shadow {
+    filter: drop-shadow(0 8px 20px hsl(var(--foreground) / 0.12));
+  }
+
+  .bar-tooltip-pop {
+    transition: opacity 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}

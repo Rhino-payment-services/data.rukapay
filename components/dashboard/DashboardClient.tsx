@@ -393,45 +393,45 @@ export function DashboardClient() {
         {txLoading && !timeseries && !channels ? <TransactionsLoadingSkeleton /> : null}
         <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
           {timeseries?.items?.length ? (
-            <Card className="flex flex-col overflow-hidden">
+            <Card className="flex flex-col overflow-visible">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">Volume (TPV)</CardTitle>
                 <CardDescription className="text-xs">Successful tx amounts over time · dashed line = target pace per bucket</CardDescription>
               </CardHeader>
-              <CardContent className="pt-0 pb-4">
+              <CardContent className="pt-0 pb-4 overflow-visible">
                 <TimeseriesLineChart
                   data={timeseries.items}
                   metric="tpv"
-                  height={200}
+                  height={280}
                   targetReference={tpvTargetPerBucket}
                 />
               </CardContent>
             </Card>
           ) : null}
           {timeseries?.items?.length ? (
-            <Card className="flex flex-col overflow-hidden">
+            <Card className="flex flex-col overflow-visible">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">Transactions (count)</CardTitle>
                 <CardDescription className="text-xs">Successful transactions per bucket · dashed line = target pace per bucket</CardDescription>
               </CardHeader>
-              <CardContent className="pt-0 pb-4">
+              <CardContent className="pt-0 pb-4 overflow-visible">
                 <TimeseriesLineChart
                   data={timeseries.items}
                   metric="transaction_count"
-                  height={200}
+                  height={280}
                   targetReference={countTargetPerBucket}
                 />
               </CardContent>
             </Card>
           ) : null}
           {channels?.items?.length ? (
-            <Card className="flex flex-col overflow-hidden lg:col-span-2">
+            <Card className="flex flex-col overflow-visible lg:col-span-2">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">By channel</CardTitle>
                 <CardDescription className="text-xs">TPV per channel</CardDescription>
               </CardHeader>
-              <CardContent className="pt-0 pb-4">
-                <ChannelBarChart data={channels.items} height={200} />
+              <CardContent className="pt-0 pb-4 overflow-visible">
+                <ChannelBarChart data={channels.items} height={280} />
               </CardContent>
             </Card>
           ) : null}
@@ -559,12 +559,12 @@ export function DashboardClient() {
         {wlError ? <AnalyticsErrorAlert message={wlError} /> : null}
         {wlLoading && !wallets?.items?.length ? <WalletChartLoadingSkeleton /> : null}
         {wallets?.items?.length ? (
-          <Card>
+          <Card className="overflow-visible">
             <CardHeader className="pb-2">
               <CardTitle className="font-outfit text-base">New wallets by type</CardTitle>
               <CardDescription className="text-xs">Personal vs merchant (business) per bucket</CardDescription>
             </CardHeader>
-            <CardContent className="pt-0">
+            <CardContent className="pt-0 overflow-visible">
               <WalletGrowthLineChart
                 data={wallets.items.map((i) => ({
                   bucket_start: String(i.bucket_start),
