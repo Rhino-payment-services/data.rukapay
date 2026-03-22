@@ -29,14 +29,8 @@ export async function fetchAnalyticsJson<T>(path: string, search: URLSearchParam
     } catch {
       // keep raw text (e.g. HTML error page snippet)
     }
-    if (message.length > 280) message = `${message.slice(0, 280)}…`;
-    const hint =
-      res.status === 500 &&
-      /internal server error/i.test(message) &&
-      !message.includes("{")
-        ? " Restart the rdbs_core data_service after updating (Merchants query fix). Check DATA_SERVICE_URL matches the running service."
-        : "";
-    throw new Error(`${res.status}: ${message}${hint}`);
+    if (message.length > 400) message = `${message.slice(0, 400)}…`;
+    throw new Error(`${res.status}: ${message}`);
   }
   try {
     return JSON.parse(text) as T;

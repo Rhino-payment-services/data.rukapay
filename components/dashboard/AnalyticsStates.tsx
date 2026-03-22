@@ -1,36 +1,64 @@
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { friendlyAnalyticsError } from "@/lib/analytics-errors";
 import { cn } from "@/lib/utils";
 
-/** Strip `400: ` style prefixes so the message reads cleanly in the UI. */
-export function parseAnalyticsErrorDetail(message: string): { code: string | null; detail: string } {
-  const m = message.trim();
-  const match = /^(\d{3}):\s*(.+)$/.exec(m);
-  if (match) return { code: match[1], detail: match[2].trim() };
-  return { code: null, detail: m };
-}
+export { parseAnalyticsErrorDetail } from "@/lib/analytics-errors";
 
 export function AnalyticsErrorAlert({
   message,
-  title,
+  title: titleOverride,
+  /** Shown before the friendly title, e.g. "Volume over time" */
+  context,
+  onRetry,
+  retryLabel = "Try again",
+  isRetrying,
   className,
 }: {
   message: string;
-  /** Defaults to a data-loading style title; pass e.g. "Couldn't sign in" on auth forms. */
   title?: string;
+  context?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+  isRetrying?: boolean;
   className?: string;
 }) {
-  const { code, detail } = parseAnalyticsErrorDetail(message);
-  const defaultTitle = code ? `Couldn't load data (HTTP ${code})` : "Couldn't load data";
+  const friendly = friendlyAnalyticsError(message);
+  const composedTitle = context ? `${context} — ${friendly.title}` : friendly.title;
+  const title = titleOverride ?? composedTitle;
+
   return (
     <Alert variant="destructive" className={cn(className)}>
-      <AlertCircle className="h-4 w-4" aria-hidden />
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <AlertTitle>{title ?? defaultTitle}</AlertTitle>
-        <AlertDescription className="text-destructive/90">{detail}</AlertDescription>
+      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="space-y-1.5">
+          <AlertTitle>{title}</AlertTitle>
+          <AlertDescription className="text-destructive/90">{friendly.body}</AlertDescription>
+        </div>
+        {friendly.technical ? (
+          <details className="text-xs text-destructive/80 max-w-full">
+            <summary className="cursor-pointer select-none font-medium">Technical details</summary>
+            <pre className="mt-2 whitespace-pre-wrap break-words font-mono bg-destructive/5 rounded-md p-2 border border-destructive/20">
+              {friendly.technical}
+            </pre>
+          </details>
+        ) : null}
+        {onRetry ? (
+          <Button type="button" variant="secondary" size="sm" onClick={onRetry} disabled={isRetrying} className="w-fit">
+            {isRetrying ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+                Loading…
+              </>
+            ) : (
+              retryLabel
+            )}
+          </Button>
+        ) : null}
       </div>
     </Alert>
   );

@@ -311,7 +311,9 @@ export function DashboardClient() {
             </Button>
           </CardContent>
         </Card>
-        {ovError ? <AnalyticsErrorAlert message={ovError} /> : null}
+        {ovError ? (
+          <AnalyticsErrorAlert message={ovError} onRetry={() => void loadOverview()} isRetrying={ovLoading} context="Overview" />
+        ) : null}
         {ovLoading && !overview ? <OverviewLoadingSkeleton /> : null}
         {overview ? (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -418,8 +420,22 @@ export function DashboardClient() {
         />
         {tsError || chError ? (
           <div className="space-y-2">
-            {tsError ? <AnalyticsErrorAlert message={`Volume over time: ${tsError}`} /> : null}
-            {chError ? <AnalyticsErrorAlert message={`Channel breakdown: ${chError}`} /> : null}
+            {tsError ? (
+              <AnalyticsErrorAlert
+                context="Volume over time"
+                message={tsError}
+                onRetry={() => void loadTransactions()}
+                isRetrying={txLoading}
+              />
+            ) : null}
+            {chError ? (
+              <AnalyticsErrorAlert
+                context="Channel breakdown"
+                message={chError}
+                onRetry={() => void loadTransactions()}
+                isRetrying={txLoading}
+              />
+            ) : null}
           </div>
         ) : null}
         {txLoading && !timeseries && !channels ? <TransactionsLoadingSkeleton /> : null}
@@ -507,7 +523,9 @@ export function DashboardClient() {
             </Button>
           </CardContent>
         </Card>
-        {usError ? <AnalyticsErrorAlert message={usError} /> : null}
+        {usError ? (
+          <AnalyticsErrorAlert message={usError} onRetry={() => void loadUsers()} isRetrying={usLoading} context="User activity" />
+        ) : null}
         {usLoading && !users ? <UsersLoadingSkeleton /> : null}
         {users ? (
           <div className="grid gap-4 lg:grid-cols-2">
@@ -588,7 +606,9 @@ export function DashboardClient() {
             </Button>
           </CardContent>
         </Card>
-        {wlError ? <AnalyticsErrorAlert message={wlError} /> : null}
+        {wlError ? (
+          <AnalyticsErrorAlert message={wlError} onRetry={() => void loadWallets()} isRetrying={wlLoading} context="Wallets" />
+        ) : null}
         {wlLoading && !wallets?.items?.length ? <WalletChartLoadingSkeleton /> : null}
         {wallets?.items?.length ? (
           <Card className="overflow-visible">
@@ -682,7 +702,9 @@ export function DashboardClient() {
             </Button>
           </CardContent>
         </Card>
-        {mcError ? <AnalyticsErrorAlert message={mcError} /> : null}
+        {mcError ? (
+          <AnalyticsErrorAlert message={mcError} onRetry={() => void loadMerchants()} isRetrying={mcLoading} context="Merchants" />
+        ) : null}
         {mcLoading && !merchants ? <MerchantsTableLoadingSkeleton /> : null}
         {merchants?.items?.length ? (
           <Card>
