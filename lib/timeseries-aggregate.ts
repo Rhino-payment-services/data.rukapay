@@ -3,6 +3,8 @@ export type TimeseriesApiItem = {
   bucket_start: string;
   tpv?: string | number;
   transaction_count?: string | number;
+  vs_previous_tpv_pct?: string | number | null;
+  vs_previous_tpv_trend?: string;
 };
 
 function num(v: unknown): number {
