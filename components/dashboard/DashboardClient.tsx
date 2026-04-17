@@ -1109,7 +1109,7 @@ export function DashboardClient() {
                   <tbody>
                     {txPartnerRows.map((row, i) => (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
-                        <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                       </tr>
