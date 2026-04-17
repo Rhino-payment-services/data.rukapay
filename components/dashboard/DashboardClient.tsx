@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, Loader2, Minus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChannelBarChart } from "@/components/charts/ChannelBarChart";
@@ -37,6 +37,24 @@ const EXEC_ANALYTICS_TIMEZONE = "Africa/Kampala" as const;
 /** Auto-refresh visible tab data so KPIs and charts stay current without a manual reload. */
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 
+type AnyMetrics = Record<string, unknown>;
+type WeeklyComparisonBundle = {
+  thisWeekOverview: AnyMetrics;
+  lastWeekOverview: AnyMetrics;
+  thisWeekUsers: AnyMetrics;
+  lastWeekUsers: AnyMetrics;
+};
+
+type WeeklyMetricCard = {
+  id: string;
+  label: string;
+  thisWeek: number;
+  lastWeek: number;
+  unit: "money" | "count" | "percent";
+  higherIsBetter: boolean;
+  criticalThresholdPct: number;
+};
+
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -55,6 +73,66 @@ function buildBaseSearch(start: string, end: string) {
   return p;
 }
 
+function toNumber(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    const parsed = Number(v);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function fmtCount(v: unknown): string {
+  return Math.round(toNumber(v)).toLocaleString();
+}
+
+function fmtMoney(v: unknown): string {
+  const n = toNumber(v);
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtPct(v: unknown): string {
+  const n = toNumber(v);
+  return `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function getWeeklyWindows(endDate: string) {
+  const end = new Date(`${endDate}T00:00:00`);
+  const thisWeekEnd = new Date(end);
+  const thisWeekStart = new Date(end);
+  thisWeekStart.setDate(thisWeekStart.getDate() - 6);
+
+  const lastWeekEnd = new Date(thisWeekStart);
+  lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+  const lastWeekStart = new Date(lastWeekEnd);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 6);
+
+  return {
+    thisWeek: { start: isoDate(thisWeekStart), end: isoDate(thisWeekEnd) },
+    lastWeek: { start: isoDate(lastWeekStart), end: isoDate(lastWeekEnd) },
+  };
+}
+
+function growthPct(current: number, previous: number): number {
+  if (previous === 0) return current === 0 ? 0 : 100;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+function formatByUnit(value: number, unit: WeeklyMetricCard["unit"]) {
+  if (unit === "money") return fmtMoney(value);
+  if (unit === "percent") return fmtPct(value);
+  return fmtCount(value);
+}
+
+function safeRatioPct(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return (numerator / denominator) * 100;
+}
+
 export function DashboardClient() {
   const defaults = useMemo(() => defaultDateRange(), []);
 
@@ -66,15 +144,19 @@ export function DashboardClient() {
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
   const [ovLoading, setOvLoading] = useState(false);
   const [ovError, setOvError] = useState<string | null>(null);
+  const [weeklyComparison, setWeeklyComparison] = useState<WeeklyComparisonBundle | null>(null);
+  const [weeklyError, setWeeklyError] = useState<string | null>(null);
 
   /** Transactions tab */
   const [txStart, setTxStart] = useState(defaults.start);
   const [txEnd, setTxEnd] = useState(defaults.end);
-  const [txGranularity, setTxGranularity] = useState<"day" | "week" | "month">("day");
+  const [txGranularity, setTxGranularity] = useState<"day" | "week" | "month">("week");
   const [timeseries, setTimeseries] = useState<{ items?: TimeseriesApiItem[] } | null>(null);
   const [channels, setChannels] = useState<{ items?: { channel: string; tpv: string }[] } | null>(null);
+  const [txOverview, setTxOverview] = useState<Record<string, unknown> | null>(null);
   const [tsError, setTsError] = useState<string | null>(null);
   const [chError, setChError] = useState<string | null>(null);
+  const [txOverviewError, setTxOverviewError] = useState<string | null>(null);
   const [txLoading, setTxLoading] = useState(false);
   const [txTargetTpvStr, setTxTargetTpvStr] = useState("");
   const [txTargetCountStr, setTxTargetCountStr] = useState("");
@@ -90,7 +172,7 @@ export function DashboardClient() {
   /** Wallets tab */
   const [wlStart, setWlStart] = useState(defaults.start);
   const [wlEnd, setWlEnd] = useState(defaults.end);
-  const [wlGranularity, setWlGranularity] = useState<"day" | "week" | "month">("day");
+  const [wlGranularity, setWlGranularity] = useState<"day" | "week" | "month">("week");
   const [wallets, setWallets] = useState<{ items?: WalletGrowthPoint[] } | null>(null);
   const [wlLoading, setWlLoading] = useState(false);
   const [wlError, setWlError] = useState<string | null>(null);
@@ -108,13 +190,26 @@ export function DashboardClient() {
   const loadOverview = useCallback(async () => {
     setOvLoading(true);
     setOvError(null);
+    setWeeklyError(null);
     try {
       const p = buildBaseSearch(ovStart, ovEnd);
-      const data = await fetchAnalyticsJson<Record<string, unknown>>("overview", p);
+      const windows = getWeeklyWindows(ovEnd);
+
+      const [data, thisWeekOverview, lastWeekOverview, thisWeekUsers, lastWeekUsers] = await Promise.all([
+        fetchAnalyticsJson<Record<string, unknown>>("overview", p),
+        fetchAnalyticsJson<Record<string, unknown>>("overview", buildBaseSearch(windows.thisWeek.start, windows.thisWeek.end)),
+        fetchAnalyticsJson<Record<string, unknown>>("overview", buildBaseSearch(windows.lastWeek.start, windows.lastWeek.end)),
+        fetchAnalyticsJson<Record<string, unknown>>("users/activity", buildBaseSearch(windows.thisWeek.start, windows.thisWeek.end)),
+        fetchAnalyticsJson<Record<string, unknown>>("users/activity", buildBaseSearch(windows.lastWeek.start, windows.lastWeek.end)),
+      ]);
+
       setOverview(data);
+      setWeeklyComparison({ thisWeekOverview, lastWeekOverview, thisWeekUsers, lastWeekUsers });
     } catch (e) {
       setOverview(null);
+      setWeeklyComparison(null);
       setOvError(e instanceof Error ? e.message : "Failed to load overview");
+      setWeeklyError("Weekly comparison unavailable.");
     } finally {
       setOvLoading(false);
     }
@@ -124,13 +219,15 @@ export function DashboardClient() {
     setTxLoading(true);
     setTsError(null);
     setChError(null);
+    setTxOverviewError(null);
     const base = buildBaseSearch(txStart, txEnd);
     const tsParams = new URLSearchParams(base);
     tsParams.set("granularity", txGranularity);
 
-    const [tsResult, chResult] = await Promise.allSettled([
+    const [tsResult, chResult, ovResult] = await Promise.allSettled([
       fetchAnalyticsJson<{ items?: TimeseriesApiItem[] }>("transactions/timeseries", tsParams),
       fetchAnalyticsJson<{ items?: { channel: string; tpv: string }[] }>("tpv/by-channel", new URLSearchParams(base)),
+      fetchAnalyticsJson<Record<string, unknown>>("overview", new URLSearchParams(base)),
     ]);
 
     if (tsResult.status === "fulfilled") {
@@ -144,6 +241,12 @@ export function DashboardClient() {
     } else {
       setChannels(null);
       setChError(chResult.reason instanceof Error ? chResult.reason.message : "Channel TPV failed");
+    }
+    if (ovResult.status === "fulfilled") {
+      setTxOverview(ovResult.value);
+    } else {
+      setTxOverview(null);
+      setTxOverviewError(ovResult.reason instanceof Error ? ovResult.reason.message : "Partner transaction breakdown failed");
     }
     setTxLoading(false);
   }, [txStart, txEnd, txGranularity]);
@@ -236,13 +339,21 @@ export function DashboardClient() {
     saveTxTargets({ tpv: txTargetTpvStr, transactionCount: txTargetCountStr });
   }, [txTargetTpvStr, txTargetCountStr]);
 
-  const fmtMoney = (v: unknown) => {
-    const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
-    if (Number.isNaN(n)) return "—";
-    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  };
-
   const txItems = timeseries?.items ?? [];
+  const txPartnerRows = Array.isArray(txOverview?.partner_fee_breakdown)
+    ? (txOverview.partner_fee_breakdown as Array<Record<string, unknown>>)
+    : [];
+  const overviewPartnerRows = Array.isArray(overview?.partner_fee_breakdown)
+    ? (overview.partner_fee_breakdown as Array<Record<string, unknown>>)
+    : [];
+  const activePartnerCount = overviewPartnerRows.filter((r) => {
+    const amount = Number(r.partner_fee_revenue ?? 0);
+    return Number.isFinite(amount) && amount > 0;
+  }).length;
+  const partnerFeeTxCount = overviewPartnerRows.reduce((acc, row) => {
+    const c = Number(row.transaction_count ?? 0);
+    return acc + (Number.isFinite(c) ? c : 0);
+  }, 0);
   const txActualTpv = useMemo(() => {
     const items = timeseries?.items ?? [];
     return items.length ? sumTimeseriesTpv(items) : null;
@@ -264,6 +375,134 @@ export function DashboardClient() {
     if (t == null || txBucketCount <= 0) return null;
     return t / txBucketCount;
   }, [txTargetCountStr, txBucketCount]);
+
+  const weeklyMetricCards = useMemo<WeeklyMetricCard[]>(() => {
+    if (!weeklyComparison) return [];
+    const current = weeklyComparison.thisWeekOverview;
+    const previous = weeklyComparison.lastWeekOverview;
+    const currentUsers = weeklyComparison.thisWeekUsers;
+    const previousUsers = weeklyComparison.lastWeekUsers;
+
+    const currentTpv = toNumber(current.tpv);
+    const previousTpv = toNumber(previous.tpv);
+    const currentFees = toNumber(current.total_fee_revenue);
+    const previousFees = toNumber(previous.total_fee_revenue);
+
+    const currentTakeRate = safeRatioPct(currentFees, currentTpv);
+    const previousTakeRate = safeRatioPct(previousFees, previousTpv);
+
+    const currentTotalMerchants = toNumber(current.total_merchants);
+    const previousTotalMerchants = toNumber(previous.total_merchants);
+    const currentActivationRate = safeRatioPct(toNumber(current.active_merchants_30d), currentTotalMerchants);
+    const previousActivationRate = safeRatioPct(toNumber(previous.active_merchants_30d), previousTotalMerchants);
+
+    const currentTotalPartners = toNumber(current.total_partners);
+    const previousTotalPartners = toNumber(previous.total_partners);
+    const currentActivePartnersRate = safeRatioPct(toNumber(current.active_partners_30d), currentTotalPartners);
+    const previousActivePartnersRate = safeRatioPct(toNumber(previous.active_partners_30d), previousTotalPartners);
+
+    const currentTotalUsers = toNumber(current.total_users);
+    const previousTotalUsers = toNumber(previous.total_users);
+    const currentActiveUsersRate = safeRatioPct(toNumber(currentUsers.active_users_30d), currentTotalUsers);
+    const previousActiveUsersRate = safeRatioPct(toNumber(previousUsers.active_users_30d), previousTotalUsers);
+
+    return [
+      {
+        id: "tpv",
+        label: "TPV",
+        thisWeek: currentTpv,
+        lastWeek: previousTpv,
+        unit: "money",
+        higherIsBetter: true,
+        criticalThresholdPct: 5,
+      },
+      {
+        id: "transactions",
+        label: "Transactions",
+        thisWeek: toNumber(current.transaction_count),
+        lastWeek: toNumber(previous.transaction_count),
+        unit: "count",
+        higherIsBetter: true,
+        criticalThresholdPct: 5,
+      },
+      {
+        id: "fees",
+        label: "Total fee revenue",
+        thisWeek: currentFees,
+        lastWeek: previousFees,
+        unit: "money",
+        higherIsBetter: true,
+        criticalThresholdPct: 5,
+      },
+      {
+        id: "success-rate",
+        label: "Success rate",
+        thisWeek: toNumber(current.success_rate),
+        lastWeek: toNumber(previous.success_rate),
+        unit: "percent",
+        higherIsBetter: true,
+        criticalThresholdPct: 2,
+      },
+      {
+        id: "take-rate",
+        label: "Take rate (Revenue / TPV)",
+        thisWeek: currentTakeRate,
+        lastWeek: previousTakeRate,
+        unit: "percent",
+        higherIsBetter: true,
+        criticalThresholdPct: 2,
+      },
+      {
+        id: "merchant-activation",
+        label: "Merchant activation rate",
+        thisWeek: currentActivationRate,
+        lastWeek: previousActivationRate,
+        unit: "percent",
+        higherIsBetter: true,
+        criticalThresholdPct: 3,
+      },
+      {
+        id: "users-active-rate",
+        label: "Active users ratio",
+        thisWeek: currentActiveUsersRate,
+        lastWeek: previousActiveUsersRate,
+        unit: "percent",
+        higherIsBetter: true,
+        criticalThresholdPct: 3,
+      },
+      {
+        id: "partners-active-rate",
+        label: "Active partners ratio",
+        thisWeek: currentActivePartnersRate,
+        lastWeek: previousActivePartnersRate,
+        unit: "percent",
+        higherIsBetter: true,
+        criticalThresholdPct: 3,
+      },
+      {
+        id: "reversal-rate",
+        label: "Reversal rate",
+        thisWeek: toNumber(current.reversal_rate),
+        lastWeek: toNumber(previous.reversal_rate),
+        unit: "percent",
+        higherIsBetter: false,
+        criticalThresholdPct: 2,
+      },
+    ];
+  }, [weeklyComparison]);
+
+  const weeklyActionFlags = useMemo(() => {
+    return weeklyMetricCards
+      .map((m) => {
+        const delta = growthPct(m.thisWeek, m.lastWeek);
+        const improving = m.higherIsBetter ? delta >= 0 : delta <= 0;
+        const status = improving ? "healthy" : Math.abs(delta) >= m.criticalThresholdPct ? "critical" : "watch";
+        return { ...m, delta, status };
+      })
+      .filter((m) => m.status !== "healthy");
+  }, [weeklyMetricCards]);
+
+  const weeklyWindows = useMemo(() => getWeeklyWindows(ovEnd), [ovEnd]);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
@@ -314,7 +553,65 @@ export function DashboardClient() {
         {ovError ? (
           <AnalyticsErrorAlert message={ovError} onRetry={() => void loadOverview()} isRetrying={ovLoading} context="Overview" />
         ) : null}
+        {weeklyError && !ovError ? <p className="text-sm text-amber-700">{weeklyError}</p> : null}
         {ovLoading && !overview ? <OverviewLoadingSkeleton /> : null}
+        {weeklyMetricCards.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Weekly decision view</CardTitle>
+              <CardDescription>
+                This week ({weeklyWindows.thisWeek.start} to {weeklyWindows.thisWeek.end}) vs last week ({weeklyWindows.lastWeek.start} to{" "}
+                {weeklyWindows.lastWeek.end}).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {weeklyMetricCards.map((metric) => {
+                  const delta = growthPct(metric.thisWeek, metric.lastWeek);
+                  const improving = metric.higherIsBetter ? delta >= 0 : delta <= 0;
+                  const isCritical = !improving && Math.abs(delta) >= metric.criticalThresholdPct;
+                  const isWatch = !improving && !isCritical;
+                  const colorClass = isCritical ? "text-red-600" : isWatch ? "text-amber-600" : "text-emerald-600";
+                  const DeltaIcon = improving ? ArrowUpRight : delta === 0 ? Minus : ArrowDownRight;
+                  return (
+                    <div key={metric.id} className="rounded-lg border p-3 space-y-1.5">
+                      <p className="text-xs text-muted-foreground">{metric.label}</p>
+                      <p className="text-lg font-semibold tabular-nums">{formatByUnit(metric.thisWeek, metric.unit)}</p>
+                      <p className="text-xs text-muted-foreground">Last week: {formatByUnit(metric.lastWeek, metric.unit)}</p>
+                      <p className={`text-xs font-medium inline-flex items-center gap-1 ${colorClass}`}>
+                        <DeltaIcon className="h-3.5 w-3.5" />
+                        {fmtPct(Math.abs(delta))} {improving ? "improving" : "declining"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs font-medium mb-2">Immediate action flags</p>
+                {weeklyActionFlags.length === 0 ? (
+                  <p className="text-sm text-emerald-700 inline-flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    No critical regression this week.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5 text-sm">
+                    {weeklyActionFlags.map((m) => {
+                      const critical = m.status === "critical";
+                      return (
+                        <li key={`${m.id}-flag`} className={`inline-flex items-center gap-2 ${critical ? "text-red-700" : "text-amber-700"}`}>
+                          <AlertTriangle className="h-4 w-4" />
+                          {m.label} is {fmtPct(Math.abs(m.delta))} {m.delta < 0 ? "down" : "up"} week-on-week
+                          {critical ? " (critical)" : " (watch)"}.
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
         {overview ? (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
@@ -332,16 +629,21 @@ export function DashboardClient() {
             <KpiCard
               label="Transactions"
               sublabel="successful transactions in the selected range"
-              value={String(overview.transaction_count ?? "—")}
+              value={fmtCount(overview.transaction_count)}
             />
             <KpiCard
               label="Success rate"
               sublabel="% of transaction attempts that completed successfully (0–100)"
-              value={`${fmtMoney(overview.success_rate)}%`}
+              value={fmtPct(overview.success_rate)}
             />
             <KpiCard
               label="Total fees charged"
               sublabel="Sum of fee + rukapayFee + thirdParty + network + processing + compliance + governmentTax (successful txs)"
+              value={fmtMoney(overview.total_fee_revenue)}
+            />
+            <KpiCard
+              label="Overall fees (all components)"
+              sublabel="End-to-end fee pool from successful txs in selected range"
               value={fmtMoney(overview.total_fee_revenue)}
             />
             <KpiCard
@@ -360,13 +662,74 @@ export function DashboardClient() {
               value={fmtMoney(overview.rukapay_fee_revenue)}
             />
             <KpiCard
+              label="Partners with fee activity"
+              sublabel="Distinct partners contributing partner/network/tax fees in range"
+              value={fmtCount(activePartnerCount)}
+            />
+            <KpiCard
+              label="Partner fee tx count"
+              sublabel="Successful transactions that contributed partner/network/tax fees"
+              value={fmtCount(partnerFeeTxCount)}
+            />
+            <KpiCard
               label="Active users (30d)"
               sublabel="users with ≥1 successful tx in trailing 30 days (from end date)"
-              value={String(overview.active_users_30d ?? "—")}
+              value={fmtCount(overview.active_users_30d)}
             />
-            <KpiCard label="New wallets" sublabel="wallets created in the selected range" value={String(overview.new_wallets ?? "—")} />
-            <KpiCard label="New merchants" sublabel="merchant records created in the selected range" value={String(overview.new_merchants ?? "—")} />
+            <KpiCard
+              label="Take rate"
+              sublabel="Revenue / TPV in selected range"
+              value={fmtPct(safeRatioPct(toNumber(overview.total_fee_revenue), toNumber(overview.tpv)))}
+            />
+            <KpiCard
+              label="Merchant activation rate"
+              sublabel="active merchants (30d) / total merchants"
+              value={fmtPct(safeRatioPct(toNumber(overview.active_merchants_30d), toNumber(overview.total_merchants)))}
+            />
+            <KpiCard
+              label="Active users ratio"
+              sublabel="active users (30d) / total users"
+              value={fmtPct(safeRatioPct(toNumber(overview.active_users_30d), toNumber(overview.total_users)))}
+            />
+            <KpiCard
+              label="Active partners ratio"
+              sublabel="active partners (30d) / total partners"
+              value={fmtPct(safeRatioPct(toNumber(overview.active_partners_30d), toNumber(overview.total_partners)))}
+            />
+            <KpiCard label="Total users" sublabel="all registered users" value={fmtCount(overview.total_users)} />
+            <KpiCard label="Total merchants" sublabel="all registered merchants" value={fmtCount(overview.total_merchants)} />
+            <KpiCard label="Total partners" sublabel="all registered API partners" value={fmtCount(overview.total_partners)} />
+            <KpiCard label="New wallets" sublabel="wallets created in the selected range" value={fmtCount(overview.new_wallets)} />
+            <KpiCard label="New merchants" sublabel="merchant records created in the selected range" value={fmtCount(overview.new_merchants)} />
           </section>
+        ) : null}
+        {overview && overviewPartnerRows.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Partner fee breakdown</CardTitle>
+              <CardDescription>Partner-level share of non-RukaPay fee components for successful transactions.</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-4 text-muted-foreground">Partner</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Fee Revenue</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Tx Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overviewPartnerRows.map((row, i) => (
+                    <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
+                      <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
         ) : null}
       </TabsContent>
 
@@ -418,7 +781,7 @@ export function DashboardClient() {
           actualTpv={txActualTpv}
           actualTxCount={txActualCount}
         />
-        {tsError || chError ? (
+        {tsError || chError || txOverviewError ? (
           <div className="space-y-2">
             {tsError ? (
               <AnalyticsErrorAlert
@@ -436,6 +799,14 @@ export function DashboardClient() {
                 isRetrying={txLoading}
               />
             ) : null}
+            {txOverviewError ? (
+              <AnalyticsErrorAlert
+                context="Partner transaction breakdown"
+                message={txOverviewError}
+                onRetry={() => void loadTransactions()}
+                isRetrying={txLoading}
+              />
+            ) : null}
           </div>
         ) : null}
         {txLoading && !timeseries && !channels ? <TransactionsLoadingSkeleton /> : null}
@@ -444,7 +815,7 @@ export function DashboardClient() {
             <Card className="flex flex-col overflow-visible">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">Volume (TPV)</CardTitle>
-                <CardDescription className="text-xs">Successful tx amounts over time · dashed line = target pace per bucket</CardDescription>
+                <CardDescription className="text-xs">Weekly comparison trend (switch granularity when needed) · dashed line = target pace per bucket</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4 overflow-visible">
                 <TimeseriesLineChart
@@ -460,7 +831,7 @@ export function DashboardClient() {
             <Card className="flex flex-col overflow-visible">
               <CardHeader className="py-3 pb-2 space-y-0">
                 <CardTitle className="font-outfit text-base">Transactions (count)</CardTitle>
-                <CardDescription className="text-xs">Successful transactions per bucket · dashed line = target pace per bucket</CardDescription>
+                <CardDescription className="text-xs">Bucket-level count with week-on-week direction available below</CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4 overflow-visible">
                 <TimeseriesLineChart
@@ -484,11 +855,85 @@ export function DashboardClient() {
             </Card>
           ) : null}
         </div>
+        {timeseries?.items?.length ? (
+          <Card>
+            <CardHeader className="py-3 pb-2">
+              <CardTitle className="font-outfit text-base">Trend summary table</CardTitle>
+              <CardDescription className="text-xs">Fast week-on-week scan of TPV movement and transaction counts.</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto pt-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-4 text-muted-foreground">Bucket</th>
+                    <th className="py-2 pr-4 text-muted-foreground">TPV</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Tx count</th>
+                    <th className="py-2 pr-4 text-muted-foreground">WoW TPV %</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeseries.items.map((row) => {
+                    const tpvPct = row.vs_previous_tpv_pct == null ? null : toNumber(row.vs_previous_tpv_pct);
+                    const trend = String(row.vs_previous_tpv_trend || "n/a");
+                    const statusClass =
+                      trend === "decrease" ? "text-red-600" : trend === "increase" ? "text-emerald-600" : "text-muted-foreground";
+                    return (
+                      <tr key={String(row.bucket_start)} className="border-b border-border/60">
+                        <td className="py-2 pr-4">{String(row.bucket_start).slice(0, 10)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{tpvPct == null ? "—" : fmtPct(tpvPct)}</td>
+                        <td className={`py-2 pr-4 capitalize ${statusClass}`}>{trend}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : null}
+        <Card>
+          <CardHeader className="py-3 pb-2">
+            <CardTitle className="font-outfit text-base">Partner transaction activity</CardTitle>
+            <CardDescription className="text-xs">
+              Partner-level fee activity for the selected transactions date range.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {txPartnerRows.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="py-2 pr-4 text-muted-foreground">Partner</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Fee revenue</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Tx count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {txPartnerRows.map((row, i) => (
+                      <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No partner fee activity found for this date range.</p>
+            )}
+          </CardContent>
+        </Card>
         {!txLoading &&
         !tsError &&
         !chError &&
+        !txOverviewError &&
         (!timeseries?.items?.length || timeseries.items.length === 0) &&
-        (!channels?.items?.length || channels.items.length === 0) ? (
+        (!channels?.items?.length || channels.items.length === 0) &&
+        txPartnerRows.length === 0 ? (
           <p className="text-muted-foreground text-sm">No chart data for this range.</p>
         ) : null}
       </TabsContent>
@@ -535,13 +980,13 @@ export function DashboardClient() {
                 <CardDescription>Counts use rolling windows anchored on the range end date (Kampala time).</CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-4 text-sm">
-                <MetricAbbrev abbr="DAU" full="daily active users" value={String(users.dau ?? "—")} />
-                <MetricAbbrev abbr="WAU" full="weekly active users" value={String(users.wau ?? "—")} />
-                <MetricAbbrev abbr="MAU" full="monthly active users" value={String(users.mau ?? "—")} />
+                <MetricAbbrev abbr="DAU" full="daily active users" value={fmtCount(users.dau)} />
+                <MetricAbbrev abbr="WAU" full="weekly active users" value={fmtCount(users.wau)} />
+                <MetricAbbrev abbr="MAU" full="monthly active users" value={fmtCount(users.mau)} />
                 <MetricAbbrev
                   abbr="Active 30d"
                   full="users with successful activity in trailing 30 days"
-                  value={String(users.active_users_30d ?? "—")}
+                  value={fmtCount(users.active_users_30d)}
                 />
               </CardContent>
             </Card>
@@ -557,9 +1002,9 @@ export function DashboardClient() {
                   return (
                     <div key={key} className="rounded-lg border p-3 space-y-2">
                       <p className="font-medium capitalize">{key}</p>
-                      <SegmentMetricLine abbr="DAU" full="daily active users" value={String(seg.dau ?? "—")} />
-                      <SegmentMetricLine abbr="WAU" full="weekly active users" value={String(seg.wau ?? "—")} />
-                      <SegmentMetricLine abbr="MAU" full="monthly active users" value={String(seg.mau ?? "—")} />
+                      <SegmentMetricLine abbr="DAU" full="daily active users" value={fmtCount(seg.dau)} />
+                      <SegmentMetricLine abbr="WAU" full="weekly active users" value={fmtCount(seg.wau)} />
+                      <SegmentMetricLine abbr="MAU" full="monthly active users" value={fmtCount(seg.mau)} />
                     </div>
                   );
                 })}
