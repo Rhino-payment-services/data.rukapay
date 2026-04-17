@@ -55,14 +55,22 @@ type WeeklyMetricCard = {
   criticalThresholdPct: number;
 };
 
+function localToday(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function defaultDateRange() {
-  const end = new Date();
+  const today = localToday();
   const start = new Date();
   start.setDate(start.getDate() - 29);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
+  const sy = start.getFullYear();
+  const sm = String(start.getMonth() + 1).padStart(2, "0");
+  const sd = String(start.getDate()).padStart(2, "0");
+  return { start: `${sy}-${sm}-${sd}`, end: today };
 }
 
 function buildBaseSearch(start: string, end: string) {
@@ -97,27 +105,35 @@ function fmtPct(v: unknown): string {
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Use local calendar date (not UTC) to avoid day-shifts in weekly windows.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function getWeeklyWindows(asOfDate: string) {
   // Calendar-week comparison:
-  // - Current week starts Monday and ends at `asOfDate` (week-to-date)
-  // - Previous week is full Monday → Sunday
+  // - Current week  : Monday of this week → min(asOfDate, today) — week-to-date
+  // - Previous week : full calendar week Monday → Sunday immediately before
   const asOf = new Date(`${asOfDate}T00:00:00`);
-  const weekdayIndex = (asOf.getDay() + 6) % 7; // Monday=0 ... Sunday=6
+  const today = new Date(`${localToday()}T00:00:00`);
 
-  const thisWeekStart = new Date(asOf);
+  // Clamp: never extend current-week end beyond today
+  const effectiveEnd = asOf > today ? today : asOf;
+
+  const weekdayIndex = (effectiveEnd.getDay() + 6) % 7; // Monday=0 … Sunday=6
+
+  const thisWeekStart = new Date(effectiveEnd);
   thisWeekStart.setDate(thisWeekStart.getDate() - weekdayIndex);
-  const thisWeekEnd = new Date(asOf);
 
   const lastWeekStart = new Date(thisWeekStart);
   lastWeekStart.setDate(lastWeekStart.getDate() - 7);
   const lastWeekEnd = new Date(thisWeekStart);
-  lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
+  lastWeekEnd.setDate(lastWeekEnd.getDate() - 1); // Sunday before this Monday
 
   return {
-    thisWeek: { start: isoDate(thisWeekStart), end: isoDate(thisWeekEnd) },
+    thisWeek: { start: isoDate(thisWeekStart), end: isoDate(effectiveEnd) },
     lastWeek: { start: isoDate(lastWeekStart), end: isoDate(lastWeekEnd) },
   };
 }
