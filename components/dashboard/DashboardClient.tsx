@@ -153,8 +153,10 @@ export function DashboardClient() {
   const [txGranularity, setTxGranularity] = useState<"day" | "week" | "month">("week");
   const [timeseries, setTimeseries] = useState<{ items?: TimeseriesApiItem[] } | null>(null);
   const [channels, setChannels] = useState<{ items?: { channel: string; tpv: string }[] } | null>(null);
+  const [txOverview, setTxOverview] = useState<Record<string, unknown> | null>(null);
   const [tsError, setTsError] = useState<string | null>(null);
   const [chError, setChError] = useState<string | null>(null);
+  const [txOverviewError, setTxOverviewError] = useState<string | null>(null);
   const [txLoading, setTxLoading] = useState(false);
   const [txTargetTpvStr, setTxTargetTpvStr] = useState("");
   const [txTargetCountStr, setTxTargetCountStr] = useState("");
@@ -217,13 +219,15 @@ export function DashboardClient() {
     setTxLoading(true);
     setTsError(null);
     setChError(null);
+    setTxOverviewError(null);
     const base = buildBaseSearch(txStart, txEnd);
     const tsParams = new URLSearchParams(base);
     tsParams.set("granularity", txGranularity);
 
-    const [tsResult, chResult] = await Promise.allSettled([
+    const [tsResult, chResult, ovResult] = await Promise.allSettled([
       fetchAnalyticsJson<{ items?: TimeseriesApiItem[] }>("transactions/timeseries", tsParams),
       fetchAnalyticsJson<{ items?: { channel: string; tpv: string }[] }>("tpv/by-channel", new URLSearchParams(base)),
+      fetchAnalyticsJson<Record<string, unknown>>("overview", new URLSearchParams(base)),
     ]);
 
     if (tsResult.status === "fulfilled") {
@@ -237,6 +241,12 @@ export function DashboardClient() {
     } else {
       setChannels(null);
       setChError(chResult.reason instanceof Error ? chResult.reason.message : "Channel TPV failed");
+    }
+    if (ovResult.status === "fulfilled") {
+      setTxOverview(ovResult.value);
+    } else {
+      setTxOverview(null);
+      setTxOverviewError(ovResult.reason instanceof Error ? ovResult.reason.message : "Partner transaction breakdown failed");
     }
     setTxLoading(false);
   }, [txStart, txEnd, txGranularity]);
@@ -330,6 +340,9 @@ export function DashboardClient() {
   }, [txTargetTpvStr, txTargetCountStr]);
 
   const txItems = timeseries?.items ?? [];
+  const txPartnerRows = Array.isArray(txOverview?.partner_fee_breakdown)
+    ? (txOverview.partner_fee_breakdown as Array<Record<string, unknown>>)
+    : [];
   const overviewPartnerRows = Array.isArray(overview?.partner_fee_breakdown)
     ? (overview.partner_fee_breakdown as Array<Record<string, unknown>>)
     : [];
@@ -768,7 +781,7 @@ export function DashboardClient() {
           actualTpv={txActualTpv}
           actualTxCount={txActualCount}
         />
-        {tsError || chError ? (
+        {tsError || chError || txOverviewError ? (
           <div className="space-y-2">
             {tsError ? (
               <AnalyticsErrorAlert
@@ -782,6 +795,14 @@ export function DashboardClient() {
               <AnalyticsErrorAlert
                 context="Channel breakdown"
                 message={chError}
+                onRetry={() => void loadTransactions()}
+                isRetrying={txLoading}
+              />
+            ) : null}
+            {txOverviewError ? (
+              <AnalyticsErrorAlert
+                context="Partner transaction breakdown"
+                message={txOverviewError}
                 onRetry={() => void loadTransactions()}
                 isRetrying={txLoading}
               />
@@ -872,11 +893,47 @@ export function DashboardClient() {
             </CardContent>
           </Card>
         ) : null}
+        <Card>
+          <CardHeader className="py-3 pb-2">
+            <CardTitle className="font-outfit text-base">Partner transaction activity</CardTitle>
+            <CardDescription className="text-xs">
+              Partner-level fee activity for the selected transactions date range.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {txPartnerRows.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="py-2 pr-4 text-muted-foreground">Partner</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Fee revenue</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Tx count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {txPartnerRows.map((row, i) => (
+                      <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No partner fee activity found for this date range.</p>
+            )}
+          </CardContent>
+        </Card>
         {!txLoading &&
         !tsError &&
         !chError &&
+        !txOverviewError &&
         (!timeseries?.items?.length || timeseries.items.length === 0) &&
-        (!channels?.items?.length || channels.items.length === 0) ? (
+        (!channels?.items?.length || channels.items.length === 0) &&
+        txPartnerRows.length === 0 ? (
           <p className="text-muted-foreground text-sm">No chart data for this range.</p>
         ) : null}
       </TabsContent>
