@@ -114,18 +114,20 @@ function isoDate(d: Date): string {
 
 function getWeeklyWindows(asOfDate: string) {
   // Calendar-week comparison:
-  // - Current week  : Monday of this week → min(asOfDate, today) — week-to-date
+  // - Current week  : full calendar week Monday → Sunday (of selected week)
   // - Previous week : full calendar week Monday → Sunday immediately before
   const asOf = new Date(`${asOfDate}T00:00:00`);
   const today = new Date(`${localToday()}T00:00:00`);
 
-  // Clamp: never extend current-week end beyond today
+  // Clamp selected date to today so future dates don't shift weekly windows.
   const effectiveEnd = asOf > today ? today : asOf;
 
   const weekdayIndex = (effectiveEnd.getDay() + 6) % 7; // Monday=0 … Sunday=6
 
   const thisWeekStart = new Date(effectiveEnd);
   thisWeekStart.setDate(thisWeekStart.getDate() - weekdayIndex);
+  const thisWeekEnd = new Date(thisWeekStart);
+  thisWeekEnd.setDate(thisWeekEnd.getDate() + 6); // Sunday
 
   const lastWeekStart = new Date(thisWeekStart);
   lastWeekStart.setDate(lastWeekStart.getDate() - 7);
@@ -133,7 +135,7 @@ function getWeeklyWindows(asOfDate: string) {
   lastWeekEnd.setDate(lastWeekEnd.getDate() - 1); // Sunday before this Monday
 
   return {
-    thisWeek: { start: isoDate(thisWeekStart), end: isoDate(effectiveEnd) },
+    thisWeek: { start: isoDate(thisWeekStart), end: isoDate(thisWeekEnd) },
     lastWeek: { start: isoDate(lastWeekStart), end: isoDate(lastWeekEnd) },
   };
 }
@@ -759,7 +761,7 @@ export function DashboardClient() {
           <CardHeader>
             <CardTitle className="font-outfit">Weekly comparison</CardTitle>
             <CardDescription>
-              Current week is week-to-date (Monday to selected date). Previous week is full calendar week (Monday to Sunday).
+              Current week is full calendar week (Monday to Sunday). Previous week is the immediately preceding Monday to Sunday week.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-4 items-end">
