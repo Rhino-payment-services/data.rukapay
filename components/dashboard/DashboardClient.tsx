@@ -911,7 +911,7 @@ export function DashboardClient() {
           <CardHeader>
             <CardTitle className="font-outfit">Weekly comparison</CardTitle>
             <CardDescription>
-              Current week is week-to-date (Monday to selected date). Previous week is full calendar week (Monday to Sunday).
+              Current week is full calendar week (Monday to Sunday). Previous week is the immediately preceding Monday to Sunday week.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-4 items-end">
