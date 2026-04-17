@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, Loader2, Minus } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, CheckCircle2, Download, Loader2, Minus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChannelBarChart } from "@/components/charts/ChannelBarChart";
@@ -185,6 +185,8 @@ export function DashboardClient() {
   const [chError, setChError] = useState<string | null>(null);
   const [txOverviewError, setTxOverviewError] = useState<string | null>(null);
   const [txLoading, setTxLoading] = useState(false);
+  const [txExporting, setTxExporting] = useState(false);
+  const [txExportError, setTxExportError] = useState<string | null>(null);
   const [txTargetTpvStr, setTxTargetTpvStr] = useState("");
   const [txTargetCountStr, setTxTargetCountStr] = useState("");
   const skipNextTxTargetSave = useRef(true);
@@ -294,6 +296,52 @@ export function DashboardClient() {
     }
     setTxLoading(false);
   }, [txStart, txEnd, txGranularity]);
+
+  const downloadTransactionsCsv = useCallback(async () => {
+    setTxExporting(true);
+    setTxExportError(null);
+    try {
+      const p = buildBaseSearch(txStart, txEnd);
+      p.set("limit", "50000");
+      const res = await fetch(`/api/analytics/transactions/export?${p.toString()}`, {
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "text/csv" },
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let message = text.trim() || res.statusText;
+        try {
+          const j = JSON.parse(text) as { detail?: unknown; error?: string };
+          if (typeof j.detail === "string") message = j.detail;
+          else if (Array.isArray(j.detail)) message = j.detail.map((d) => JSON.stringify(d)).join("; ");
+          else if (typeof j.error === "string") message = j.error;
+        } catch {
+          // response was not JSON
+        }
+        throw new Error(message.length > 400 ? `${message.slice(0, 400)}…` : message);
+      }
+      const blob = new Blob([`\uFEFF${text}`], { type: "text/csv;charset=utf-8" });
+      const cd = res.headers.get("content-disposition");
+      const quoted = cd?.match(/filename="([^"]+)"/i);
+      const plain = cd?.match(/filename=([^;\s]+)/i);
+      const rawName = quoted?.[1]?.trim() ?? plain?.[1]?.trim();
+      const filename = rawName ?? `transactions_raw_${txStart}_${txEnd}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename.replace(/^"+|"+$/g, "");
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setTxExportError(e instanceof Error ? e.message : "CSV export failed");
+    } finally {
+      setTxExporting(false);
+    }
+  }, [txStart, txEnd]);
 
   const loadUsers = useCallback(async () => {
     setUsLoading(true);
@@ -800,6 +848,14 @@ export function DashboardClient() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
+                  Current week: {weeklyWindows.thisWeek.start} → {weeklyWindows.thisWeek.end}
+                </span>
+                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
+                  Previous week: {weeklyWindows.lastWeek.start} → {weeklyWindows.lastWeek.end}
+                </span>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {weeklyMetricCards.map((metric) => {
                   const delta = growthPct(metric.thisWeek, metric.lastWeek);
@@ -889,8 +945,30 @@ export function DashboardClient() {
                 "Apply"
               )}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => void downloadTransactionsCsv()}
+              disabled={txExporting || txLoading}
+              title="Raw transaction rows for the selected date range (up to 50,000 rows). Opens as CSV in Excel."
+            >
+              {txExporting ? (
+                <>
+                  <Loader2 className="animate-spin h-4 w-4 mr-1.5" aria-hidden />
+                  Exporting…
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4 mr-1.5" aria-hidden />
+                  Download CSV
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
+        {txExportError ? <p className="text-sm text-red-600 px-1">{txExportError}</p> : null}
         <TransactionTargetsComparison
           targetTpvInput={txTargetTpvStr}
           targetCountInput={txTargetCountStr}
