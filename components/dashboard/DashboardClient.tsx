@@ -385,11 +385,11 @@ export function DashboardClient() {
 
     const currentTpv = toNumber(current.tpv);
     const previousTpv = toNumber(previous.tpv);
-    const currentFees = toNumber(current.total_fee_revenue);
-    const previousFees = toNumber(previous.total_fee_revenue);
+    const currentRukapayRevenue = toNumber(current.rukapay_fee_revenue);
+    const previousRukapayRevenue = toNumber(previous.rukapay_fee_revenue);
 
-    const currentTakeRate = safeRatioPct(currentFees, currentTpv);
-    const previousTakeRate = safeRatioPct(previousFees, previousTpv);
+    const currentTakeRate = safeRatioPct(currentRukapayRevenue, currentTpv);
+    const previousTakeRate = safeRatioPct(previousRukapayRevenue, previousTpv);
 
     const currentTotalMerchants = toNumber(current.total_merchants);
     const previousTotalMerchants = toNumber(previous.total_merchants);
@@ -426,10 +426,10 @@ export function DashboardClient() {
         criticalThresholdPct: 5,
       },
       {
-        id: "fees",
-        label: "Total fee revenue",
-        thisWeek: currentFees,
-        lastWeek: previousFees,
+        id: "rukapay-revenue",
+        label: "RukaPay revenue",
+        thisWeek: currentRukapayRevenue,
+        lastWeek: previousRukapayRevenue,
         unit: "money",
         higherIsBetter: true,
         criticalThresholdPct: 5,
@@ -445,7 +445,7 @@ export function DashboardClient() {
       },
       {
         id: "take-rate",
-        label: "Take rate (Revenue / TPV)",
+        label: "Take rate (RukaPay revenue / TPV)",
         thisWeek: currentTakeRate,
         lastWeek: previousTakeRate,
         unit: "percent",
@@ -637,13 +637,13 @@ export function DashboardClient() {
               value={fmtPct(overview.success_rate)}
             />
             <KpiCard
-              label="Total fees charged"
-              sublabel="Sum of fee + rukapayFee + thirdParty + network + processing + compliance + governmentTax (successful txs)"
-              value={fmtMoney(overview.total_fee_revenue)}
+              label="RukaPay revenue"
+              sublabel="Our platform revenue only (rukapayFee) from successful transactions"
+              value={fmtMoney(overview.rukapay_fee_revenue)}
             />
             <KpiCard
-              label="Overall fees (all components)"
-              sublabel="End-to-end fee pool from successful txs in selected range"
+              label="Total fees charged (all components)"
+              sublabel="Full fee pool = RukaPay + partner/network/tax fees (successful txs)"
               value={fmtMoney(overview.total_fee_revenue)}
             />
             <KpiCard
@@ -657,9 +657,9 @@ export function DashboardClient() {
               value={fmtMoney(overview.partner_fee_revenue)}
             />
             <KpiCard
-              label="RukaPay fee revenue"
-              sublabel="Platform fee only (rukapayFee) on successful txs — subset of total fees charged"
-              value={fmtMoney(overview.rukapay_fee_revenue)}
+              label="RukaPay share of total fees"
+              sublabel="% of total fee pool retained by RukaPay"
+              value={fmtPct(safeRatioPct(toNumber(overview.rukapay_fee_revenue), toNumber(overview.total_fee_revenue)))}
             />
             <KpiCard
               label="Partners with fee activity"
@@ -677,9 +677,9 @@ export function DashboardClient() {
               value={fmtCount(overview.active_users_30d)}
             />
             <KpiCard
-              label="Take rate"
-              sublabel="Revenue / TPV in selected range"
-              value={fmtPct(safeRatioPct(toNumber(overview.total_fee_revenue), toNumber(overview.tpv)))}
+              label="Take rate (RukaPay)"
+              sublabel="RukaPay revenue / TPV in selected range"
+              value={fmtPct(safeRatioPct(toNumber(overview.rukapay_fee_revenue), toNumber(overview.tpv)))}
             />
             <KpiCard
               label="Merchant activation rate"
