@@ -41,10 +41,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   const search = request.nextUrl.search;
   const url = `${base.replace(/\/$/, "")}/analytics/${path}${search}`;
 
+  const accept = request.headers.get("accept") ?? "application/json";
+
   let upstream: Response;
   try {
     upstream = await fetch(url, {
-      headers: { Accept: "application/json" },
+      headers: { Accept: accept },
       cache: "no-store",
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
@@ -83,8 +85,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
     );
   }
 
+  const headers = new Headers();
+  headers.set("Content-Type", contentType);
+  const cd = upstream.headers.get("content-disposition");
+  if (cd) headers.set("Content-Disposition", cd);
+
   return new NextResponse(text, {
     status: upstream.status,
-    headers: { "Content-Type": contentType },
+    headers,
   });
 }
