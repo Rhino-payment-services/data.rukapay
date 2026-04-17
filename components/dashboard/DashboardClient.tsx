@@ -950,6 +950,14 @@ export function DashboardClient() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
+                  Current week: {weeklyWindows.thisWeek.start} → {weeklyWindows.thisWeek.end}
+                </span>
+                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
+                  Previous week: {weeklyWindows.lastWeek.start} → {weeklyWindows.lastWeek.end}
+                </span>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {weeklyMetricCards.map((metric) => {
                   const delta = growthPct(metric.thisWeek, metric.lastWeek);
