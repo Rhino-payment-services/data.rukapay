@@ -100,16 +100,21 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function getWeeklyWindows(endDate: string) {
-  const end = new Date(`${endDate}T00:00:00`);
-  const thisWeekEnd = new Date(end);
-  const thisWeekStart = new Date(end);
-  thisWeekStart.setDate(thisWeekStart.getDate() - 6);
+function getWeeklyWindows(asOfDate: string) {
+  // Calendar-week comparison:
+  // - Current week starts Monday and ends at `asOfDate` (week-to-date)
+  // - Previous week is full Monday → Sunday
+  const asOf = new Date(`${asOfDate}T00:00:00`);
+  const weekdayIndex = (asOf.getDay() + 6) % 7; // Monday=0 ... Sunday=6
 
+  const thisWeekStart = new Date(asOf);
+  thisWeekStart.setDate(thisWeekStart.getDate() - weekdayIndex);
+  const thisWeekEnd = new Date(asOf);
+
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
   const lastWeekEnd = new Date(thisWeekStart);
   lastWeekEnd.setDate(lastWeekEnd.getDate() - 1);
-  const lastWeekStart = new Date(lastWeekEnd);
-  lastWeekStart.setDate(lastWeekStart.getDate() - 6);
 
   return {
     thisWeek: { start: isoDate(thisWeekStart), end: isoDate(thisWeekEnd) },
@@ -144,7 +149,11 @@ export function DashboardClient() {
   const [overview, setOverview] = useState<Record<string, unknown> | null>(null);
   const [ovLoading, setOvLoading] = useState(false);
   const [ovError, setOvError] = useState<string | null>(null);
+
+  /** Weekly tab */
+  const [weeklyAsOf, setWeeklyAsOf] = useState(defaults.end);
   const [weeklyComparison, setWeeklyComparison] = useState<WeeklyComparisonBundle | null>(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [weeklyError, setWeeklyError] = useState<string | null>(null);
 
   /** Transactions tab */
@@ -187,33 +196,50 @@ export function DashboardClient() {
   const [mcLoading, setMcLoading] = useState(false);
   const [mcError, setMcError] = useState<string | null>(null);
 
+  /** Partners tab */
+  const [paStart, setPaStart] = useState(defaults.start);
+  const [paEnd, setPaEnd] = useState(defaults.end);
+  const [paSort, setPaSort] = useState<"fee" | "count" | "name">("fee");
+  const [paLimit, setPaLimit] = useState(10);
+  const [partnersOverview, setPartnersOverview] = useState<Record<string, unknown> | null>(null);
+  const [paLoading, setPaLoading] = useState(false);
+  const [paError, setPaError] = useState<string | null>(null);
+
   const loadOverview = useCallback(async () => {
     setOvLoading(true);
     setOvError(null);
-    setWeeklyError(null);
     try {
       const p = buildBaseSearch(ovStart, ovEnd);
-      const windows = getWeeklyWindows(ovEnd);
+      const data = await fetchAnalyticsJson<Record<string, unknown>>("overview", p);
 
-      const [data, thisWeekOverview, lastWeekOverview, thisWeekUsers, lastWeekUsers] = await Promise.all([
-        fetchAnalyticsJson<Record<string, unknown>>("overview", p),
+      setOverview(data);
+    } catch (e) {
+      setOverview(null);
+      setOvError(e instanceof Error ? e.message : "Failed to load overview");
+    } finally {
+      setOvLoading(false);
+    }
+  }, [ovStart, ovEnd]);
+
+  const loadWeeklyComparison = useCallback(async () => {
+    setWeeklyLoading(true);
+    setWeeklyError(null);
+    try {
+      const windows = getWeeklyWindows(weeklyAsOf);
+      const [thisWeekOverview, lastWeekOverview, thisWeekUsers, lastWeekUsers] = await Promise.all([
         fetchAnalyticsJson<Record<string, unknown>>("overview", buildBaseSearch(windows.thisWeek.start, windows.thisWeek.end)),
         fetchAnalyticsJson<Record<string, unknown>>("overview", buildBaseSearch(windows.lastWeek.start, windows.lastWeek.end)),
         fetchAnalyticsJson<Record<string, unknown>>("users/activity", buildBaseSearch(windows.thisWeek.start, windows.thisWeek.end)),
         fetchAnalyticsJson<Record<string, unknown>>("users/activity", buildBaseSearch(windows.lastWeek.start, windows.lastWeek.end)),
       ]);
-
-      setOverview(data);
       setWeeklyComparison({ thisWeekOverview, lastWeekOverview, thisWeekUsers, lastWeekUsers });
     } catch (e) {
-      setOverview(null);
       setWeeklyComparison(null);
-      setOvError(e instanceof Error ? e.message : "Failed to load overview");
-      setWeeklyError("Weekly comparison unavailable.");
+      setWeeklyError(e instanceof Error ? e.message : "Weekly comparison unavailable.");
     } finally {
-      setOvLoading(false);
+      setWeeklyLoading(false);
     }
-  }, [ovStart, ovEnd]);
+  }, [weeklyAsOf]);
 
   const loadTransactions = useCallback(async () => {
     setTxLoading(true);
@@ -301,13 +327,30 @@ export function DashboardClient() {
     }
   }, [mcStart, mcEnd, mcPeriod, mcSort, mcLimit]);
 
+  const loadPartners = useCallback(async () => {
+    setPaLoading(true);
+    setPaError(null);
+    try {
+      const p = buildBaseSearch(paStart, paEnd);
+      const data = await fetchAnalyticsJson<Record<string, unknown>>("overview", p);
+      setPartnersOverview(data);
+    } catch (e) {
+      setPartnersOverview(null);
+      setPaError(e instanceof Error ? e.message : "Failed to load partners");
+    } finally {
+      setPaLoading(false);
+    }
+  }, [paStart, paEnd]);
+
   // Load when switching tabs only; use "Apply" to refetch with new filters (avoids refetch on every keystroke).
   useEffect(() => {
     if (tab === "overview") void loadOverview();
+    else if (tab === "weekly") void loadWeeklyComparison();
     else if (tab === "transactions") void loadTransactions();
     else if (tab === "users") void loadUsers();
     else if (tab === "wallets") void loadWallets();
     else if (tab === "merchants") void loadMerchants();
+    else if (tab === "partners") void loadPartners();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally tab-only; loaders close over latest filters
   }, [tab]);
 
@@ -316,14 +359,16 @@ export function DashboardClient() {
     const tick = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       if (tab === "overview") void loadOverview();
+      else if (tab === "weekly") void loadWeeklyComparison();
       else if (tab === "transactions") void loadTransactions();
       else if (tab === "users") void loadUsers();
       else if (tab === "wallets") void loadWallets();
       else if (tab === "merchants") void loadMerchants();
+      else if (tab === "partners") void loadPartners();
     };
     const id = window.setInterval(tick, AUTO_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [tab, loadOverview, loadTransactions, loadUsers, loadWallets, loadMerchants]);
+  }, [tab, loadOverview, loadWeeklyComparison, loadTransactions, loadUsers, loadWallets, loadMerchants, loadPartners]);
 
   useEffect(() => {
     const t = loadTxTargets();
@@ -346,6 +391,24 @@ export function DashboardClient() {
   const overviewPartnerRows = Array.isArray(overview?.partner_fee_breakdown)
     ? (overview.partner_fee_breakdown as Array<Record<string, unknown>>)
     : [];
+  const partnerTabRowsRaw = Array.isArray(partnersOverview?.partner_fee_breakdown)
+    ? (partnersOverview.partner_fee_breakdown as Array<Record<string, unknown>>)
+    : [];
+  const partnerTabRows = useMemo(() => {
+    const sorted = [...partnerTabRowsRaw].sort((a, b) => {
+      if (paSort === "count") {
+        return Number(b.transaction_count ?? 0) - Number(a.transaction_count ?? 0);
+      }
+      if (paSort === "name") {
+        return String(a.partner_name ?? "UNASSIGNED").localeCompare(String(b.partner_name ?? "UNASSIGNED"));
+      }
+      return Number(b.partner_fee_revenue ?? 0) - Number(a.partner_fee_revenue ?? 0);
+    });
+    return sorted.slice(0, Math.min(100, Math.max(1, paLimit)));
+  }, [partnerTabRowsRaw, paSort, paLimit]);
+  const partnerTabTotalFeePool = useMemo(() => {
+    return partnerTabRows.reduce((acc, row) => acc + Number(row.partner_fee_revenue ?? 0), 0);
+  }, [partnerTabRows]);
   const activePartnerCount = overviewPartnerRows.filter((r) => {
     const amount = Number(r.partner_fee_revenue ?? 0);
     return Number.isFinite(amount) && amount > 0;
@@ -502,18 +565,18 @@ export function DashboardClient() {
       .filter((m) => m.status !== "healthy");
   }, [weeklyMetricCards]);
 
-  const weeklyWindows = useMemo(() => getWeeklyWindows(ovEnd), [ovEnd]);
+  const weeklyWindows = useMemo(() => getWeeklyWindows(weeklyAsOf), [weeklyAsOf]);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 h-auto min-h-10">
+      <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 h-auto min-h-10">
         <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="weekly">Weekly</TabsTrigger>
         <TabsTrigger value="transactions">Transactions</TabsTrigger>
         <TabsTrigger value="users">Users</TabsTrigger>
         <TabsTrigger value="wallets">Wallets</TabsTrigger>
-        <TabsTrigger value="merchants" className="col-span-2 sm:col-span-1">
-          Merchants
-        </TabsTrigger>
+        <TabsTrigger value="partners">Partners</TabsTrigger>
+        <TabsTrigger value="merchants">Merchants</TabsTrigger>
       </TabsList>
       <p className="text-xs text-muted-foreground">
         Timezone: <span className="font-medium text-foreground/80">Kampala</span> ({EXEC_ANALYTICS_TIMEZONE}) · Active tab
@@ -553,65 +616,7 @@ export function DashboardClient() {
         {ovError ? (
           <AnalyticsErrorAlert message={ovError} onRetry={() => void loadOverview()} isRetrying={ovLoading} context="Overview" />
         ) : null}
-        {weeklyError && !ovError ? <p className="text-sm text-amber-700">{weeklyError}</p> : null}
         {ovLoading && !overview ? <OverviewLoadingSkeleton /> : null}
-        {weeklyMetricCards.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="font-outfit">Weekly decision view</CardTitle>
-              <CardDescription>
-                This week ({weeklyWindows.thisWeek.start} to {weeklyWindows.thisWeek.end}) vs last week ({weeklyWindows.lastWeek.start} to{" "}
-                {weeklyWindows.lastWeek.end}).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {weeklyMetricCards.map((metric) => {
-                  const delta = growthPct(metric.thisWeek, metric.lastWeek);
-                  const improving = metric.higherIsBetter ? delta >= 0 : delta <= 0;
-                  const isCritical = !improving && Math.abs(delta) >= metric.criticalThresholdPct;
-                  const isWatch = !improving && !isCritical;
-                  const colorClass = isCritical ? "text-red-600" : isWatch ? "text-amber-600" : "text-emerald-600";
-                  const DeltaIcon = improving ? ArrowUpRight : delta === 0 ? Minus : ArrowDownRight;
-                  return (
-                    <div key={metric.id} className="rounded-lg border p-3 space-y-1.5">
-                      <p className="text-xs text-muted-foreground">{metric.label}</p>
-                      <p className="text-lg font-semibold tabular-nums">{formatByUnit(metric.thisWeek, metric.unit)}</p>
-                      <p className="text-xs text-muted-foreground">Last week: {formatByUnit(metric.lastWeek, metric.unit)}</p>
-                      <p className={`text-xs font-medium inline-flex items-center gap-1 ${colorClass}`}>
-                        <DeltaIcon className="h-3.5 w-3.5" />
-                        {fmtPct(Math.abs(delta))} {improving ? "improving" : "declining"}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs font-medium mb-2">Immediate action flags</p>
-                {weeklyActionFlags.length === 0 ? (
-                  <p className="text-sm text-emerald-700 inline-flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    No critical regression this week.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5 text-sm">
-                    {weeklyActionFlags.map((m) => {
-                      const critical = m.status === "critical";
-                      return (
-                        <li key={`${m.id}-flag`} className={`inline-flex items-center gap-2 ${critical ? "text-red-700" : "text-amber-700"}`}>
-                          <AlertTriangle className="h-4 w-4" />
-                          {m.label} is {fmtPct(Math.abs(m.delta))} {m.delta < 0 ? "down" : "up"} week-on-week
-                          {critical ? " (critical)" : " (watch)"}.
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
         {overview ? (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard
@@ -730,6 +735,101 @@ export function DashboardClient() {
               </table>
             </CardContent>
           </Card>
+        ) : null}
+      </TabsContent>
+
+      <TabsContent value="weekly" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-outfit">Weekly comparison</CardTitle>
+            <CardDescription>
+              Current week is week-to-date (Monday to selected date). Previous week is full calendar week (Monday to Sunday).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="weekly-as-of">As of date</Label>
+              <Input id="weekly-as-of" type="date" value={weeklyAsOf} onChange={(e) => setWeeklyAsOf(e.target.value)} />
+            </div>
+            <Button type="button" onClick={() => void loadWeeklyComparison()} disabled={weeklyLoading}>
+              {weeklyLoading ? (
+                <>
+                  <Loader2 className="animate-spin" aria-hidden />
+                  Loading…
+                </>
+              ) : (
+                "Apply"
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+        {weeklyError ? (
+          <AnalyticsErrorAlert
+            message={weeklyError}
+            onRetry={() => void loadWeeklyComparison()}
+            isRetrying={weeklyLoading}
+            context="Weekly comparison"
+          />
+        ) : null}
+        {weeklyLoading && !weeklyComparison ? <OverviewLoadingSkeleton /> : null}
+        {weeklyMetricCards.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Weekly decision view</CardTitle>
+              <CardDescription>
+                This week ({weeklyWindows.thisWeek.start} to {weeklyWindows.thisWeek.end}) vs last week ({weeklyWindows.lastWeek.start} to{" "}
+                {weeklyWindows.lastWeek.end}).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {weeklyMetricCards.map((metric) => {
+                  const delta = growthPct(metric.thisWeek, metric.lastWeek);
+                  const improving = metric.higherIsBetter ? delta >= 0 : delta <= 0;
+                  const isCritical = !improving && Math.abs(delta) >= metric.criticalThresholdPct;
+                  const isWatch = !improving && !isCritical;
+                  const colorClass = isCritical ? "text-red-600" : isWatch ? "text-amber-600" : "text-emerald-600";
+                  const DeltaIcon = improving ? ArrowUpRight : delta === 0 ? Minus : ArrowDownRight;
+                  return (
+                    <div key={metric.id} className="rounded-lg border p-3 space-y-1.5">
+                      <p className="text-xs text-muted-foreground">{metric.label}</p>
+                      <p className="text-lg font-semibold tabular-nums">{formatByUnit(metric.thisWeek, metric.unit)}</p>
+                      <p className="text-xs text-muted-foreground">Last week: {formatByUnit(metric.lastWeek, metric.unit)}</p>
+                      <p className={`text-xs font-medium inline-flex items-center gap-1 ${colorClass}`}>
+                        <DeltaIcon className="h-3.5 w-3.5" />
+                        {fmtPct(Math.abs(delta))} {improving ? "improving" : "declining"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs font-medium mb-2">Immediate action flags</p>
+                {weeklyActionFlags.length === 0 ? (
+                  <p className="text-sm text-emerald-700 inline-flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    No critical regression this week.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5 text-sm">
+                    {weeklyActionFlags.map((m) => {
+                      const critical = m.status === "critical";
+                      return (
+                        <li key={`${m.id}-flag`} className={`inline-flex items-center gap-2 ${critical ? "text-red-700" : "text-amber-700"}`}>
+                          <AlertTriangle className="h-4 w-4" />
+                          {m.label} is {fmtPct(Math.abs(m.delta))} {m.delta < 0 ? "down" : "up"} week-on-week
+                          {critical ? " (critical)" : " (watch)"}.
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : !weeklyError && !weeklyLoading ? (
+          <p className="text-muted-foreground text-sm">No weekly comparison data for this selection.</p>
         ) : null}
       </TabsContent>
 
@@ -1186,6 +1286,108 @@ export function DashboardClient() {
           </Card>
         ) : !mcError && !mcLoading ? (
           <p className="text-muted-foreground text-sm">No merchant ranking data for this range.</p>
+        ) : null}
+      </TabsContent>
+
+      <TabsContent value="partners" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-outfit">Partner activity filters</CardTitle>
+            <CardDescription>Date range, ranking sort, and result limit.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="pa-start">Start</Label>
+              <Input id="pa-start" type="date" value={paStart} onChange={(e) => setPaStart(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pa-end">End</Label>
+              <Input id="pa-end" type="date" value={paEnd} onChange={(e) => setPaEnd(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Sort by</Label>
+              <div className="flex gap-2">
+                {(
+                  [
+                    { id: "fee" as const, label: "fee revenue" },
+                    { id: "count" as const, label: "tx count" },
+                    { id: "name" as const, label: "name" },
+                  ] as const
+                ).map((s) => (
+                  <Button key={s.id} type="button" variant={paSort === s.id ? "default" : "outline"} size="sm" onClick={() => setPaSort(s.id)}>
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pa-limit">Limit</Label>
+              <Input
+                id="pa-limit"
+                type="number"
+                min={1}
+                max={100}
+                className="w-24"
+                value={paLimit}
+                onChange={(e) => setPaLimit(parseInt(e.target.value, 10) || 10)}
+              />
+            </div>
+            <Button type="button" onClick={() => void loadPartners()} disabled={paLoading}>
+              {paLoading ? (
+                <>
+                  <Loader2 className="animate-spin" aria-hidden />
+                  Loading…
+                </>
+              ) : (
+                "Apply"
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+        {paError ? (
+          <AnalyticsErrorAlert message={paError} onRetry={() => void loadPartners()} isRetrying={paLoading} context="Partners" />
+        ) : null}
+        {paLoading && !partnersOverview ? <MerchantsTableLoadingSkeleton /> : null}
+        {partnerTabRows.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Top partners</CardTitle>
+              <CardDescription>
+                Sorted by {paSort === "fee" ? "fee revenue" : paSort === "count" ? "transaction count" : "name"} · top{" "}
+                {Math.min(100, Math.max(1, paLimit))}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-4 text-muted-foreground align-bottom">#</th>
+                    <th className="py-2 pr-4 text-muted-foreground align-bottom">Partner</th>
+                    <ThAbbr abbr="Fee revenue" full="Partner/network/tax fee revenue contributed by this partner" />
+                    <ThAbbr abbr="Tx count" full="Successful transactions with partner fee activity" />
+                    <ThAbbr abbr="Share %" full="Partner share of displayed fee pool" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {partnerTabRows.map((row, i) => {
+                    const feeRevenue = Number(row.partner_fee_revenue ?? 0);
+                    const sharePct = safeRatioPct(feeRevenue, partnerTabTotalFeePool);
+                    return (
+                      <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
+                        <td className="py-2 pr-4">{i + 1}</td>
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(feeRevenue)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtPct(sharePct)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : !paError && !paLoading ? (
+          <p className="text-muted-foreground text-sm">No partner activity data for this range.</p>
         ) : null}
       </TabsContent>
     </Tabs>
