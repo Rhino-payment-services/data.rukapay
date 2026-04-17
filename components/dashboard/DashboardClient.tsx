@@ -466,7 +466,7 @@ export function DashboardClient() {
         return Number(b.transaction_count ?? 0) - Number(a.transaction_count ?? 0);
       }
       if (paSort === "name") {
-        return String(a.partner_name ?? "").localeCompare(String(b.partner_name ?? ""));
+        return String(a.partner_name ?? "UNASSIGNED").localeCompare(String(b.partner_name ?? "UNASSIGNED"));
       }
       return Number(b.partner_fee_revenue ?? 0) - Number(a.partner_fee_revenue ?? 0);
     });
@@ -855,6 +855,101 @@ export function DashboardClient() {
                   Previous week: {weeklyWindows.lastWeek.start} → {weeklyWindows.lastWeek.end}
                 </span>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {weeklyMetricCards.map((metric) => {
+                  const delta = growthPct(metric.thisWeek, metric.lastWeek);
+                  const improving = metric.higherIsBetter ? delta >= 0 : delta <= 0;
+                  const isCritical = !improving && Math.abs(delta) >= metric.criticalThresholdPct;
+                  const isWatch = !improving && !isCritical;
+                  const colorClass = isCritical ? "text-red-600" : isWatch ? "text-amber-600" : "text-emerald-600";
+                  const DeltaIcon = improving ? ArrowUpRight : delta === 0 ? Minus : ArrowDownRight;
+                  return (
+                    <div key={metric.id} className="rounded-lg border p-3 space-y-1.5">
+                      <p className="text-xs text-muted-foreground">{metric.label}</p>
+                      <p className="text-lg font-semibold tabular-nums">{formatByUnit(metric.thisWeek, metric.unit)}</p>
+                      <p className="text-xs text-muted-foreground">Last week: {formatByUnit(metric.lastWeek, metric.unit)}</p>
+                      <p className={`text-xs font-medium inline-flex items-center gap-1 ${colorClass}`}>
+                        <DeltaIcon className="h-3.5 w-3.5" />
+                        {fmtPct(Math.abs(delta))} {improving ? "improving" : "declining"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-3">
+                <p className="text-xs font-medium mb-2">Immediate action flags</p>
+                {weeklyActionFlags.length === 0 ? (
+                  <p className="text-sm text-emerald-700 inline-flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4" />
+                    No critical regression this week.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5 text-sm">
+                    {weeklyActionFlags.map((m) => {
+                      const critical = m.status === "critical";
+                      return (
+                        <li key={`${m.id}-flag`} className={`inline-flex items-center gap-2 ${critical ? "text-red-700" : "text-amber-700"}`}>
+                          <AlertTriangle className="h-4 w-4" />
+                          {m.label} is {fmtPct(Math.abs(m.delta))} {m.delta < 0 ? "down" : "up"} week-on-week
+                          {critical ? " (critical)" : " (watch)"}.
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : !weeklyError && !weeklyLoading ? (
+          <p className="text-muted-foreground text-sm">No weekly comparison data for this selection.</p>
+        ) : null}
+      </TabsContent>
+
+      <TabsContent value="weekly" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-outfit">Weekly comparison</CardTitle>
+            <CardDescription>
+              Current week is week-to-date (Monday to selected date). Previous week is full calendar week (Monday to Sunday).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="weekly-as-of">As of date</Label>
+              <Input id="weekly-as-of" type="date" value={weeklyAsOf} onChange={(e) => setWeeklyAsOf(e.target.value)} />
+            </div>
+            <Button type="button" onClick={() => void loadWeeklyComparison()} disabled={weeklyLoading}>
+              {weeklyLoading ? (
+                <>
+                  <Loader2 className="animate-spin" aria-hidden />
+                  Loading…
+                </>
+              ) : (
+                "Apply"
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+        {weeklyError ? (
+          <AnalyticsErrorAlert
+            message={weeklyError}
+            onRetry={() => void loadWeeklyComparison()}
+            isRetrying={weeklyLoading}
+            context="Weekly comparison"
+          />
+        ) : null}
+        {weeklyLoading && !weeklyComparison ? <OverviewLoadingSkeleton /> : null}
+        {weeklyMetricCards.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Weekly decision view</CardTitle>
+              <CardDescription>
+                This week ({weeklyWindows.thisWeek.start} to {weeklyWindows.thisWeek.end}) vs last week ({weeklyWindows.lastWeek.start} to{" "}
+                {weeklyWindows.lastWeek.end}).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {weeklyMetricCards.map((metric) => {
                   const delta = growthPct(metric.thisWeek, metric.lastWeek);
@@ -1470,7 +1565,7 @@ export function DashboardClient() {
                     return (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{i + 1}</td>
-                        <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(feeRevenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtPct(sharePct)}</td>
