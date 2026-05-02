@@ -793,7 +793,7 @@ export function DashboardClient() {
                 <tbody>
                   {overviewPartnerRows.map((row, i) => (
                     <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
-                      <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
+                      <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
@@ -803,106 +803,6 @@ export function DashboardClient() {
               </table>
             </CardContent>
           </Card>
-        ) : null}
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-outfit">Weekly comparison</CardTitle>
-            <CardDescription>
-              Current week is full calendar week (Monday to Sunday). Previous week is the immediately preceding Monday to Sunday week.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-4 items-end">
-            <div className="space-y-2">
-              <Label htmlFor="weekly-as-of">As of date</Label>
-              <Input id="weekly-as-of" type="date" value={weeklyAsOf} onChange={(e) => setWeeklyAsOf(e.target.value)} />
-            </div>
-            <Button type="button" onClick={() => void loadWeeklyComparison()} disabled={weeklyLoading}>
-              {weeklyLoading ? (
-                <>
-                  <Loader2 className="animate-spin" aria-hidden />
-                  Loading…
-                </>
-              ) : (
-                "Apply"
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-        {weeklyError ? (
-          <AnalyticsErrorAlert
-            message={weeklyError}
-            onRetry={() => void loadWeeklyComparison()}
-            isRetrying={weeklyLoading}
-            context="Weekly comparison"
-          />
-        ) : null}
-        {weeklyLoading && !weeklyComparison ? <OverviewLoadingSkeleton /> : null}
-        {weeklyMetricCards.length > 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="font-outfit">Weekly decision view</CardTitle>
-              <CardDescription>
-                This week ({weeklyWindows.thisWeek.start} to {weeklyWindows.thisWeek.end}) vs last week ({weeklyWindows.lastWeek.start} to{" "}
-                {weeklyWindows.lastWeek.end}).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
-                  Current week: {weeklyWindows.thisWeek.start} → {weeklyWindows.thisWeek.end}
-                </span>
-                <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs text-foreground/80">
-                  Previous week: {weeklyWindows.lastWeek.start} → {weeklyWindows.lastWeek.end}
-                </span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {weeklyMetricCards.map((metric) => {
-                  const delta = growthPct(metric.thisWeek, metric.lastWeek);
-                  const improving = metric.higherIsBetter ? delta >= 0 : delta <= 0;
-                  const isCritical = !improving && Math.abs(delta) >= metric.criticalThresholdPct;
-                  const isWatch = !improving && !isCritical;
-                  const colorClass = isCritical ? "text-red-600" : isWatch ? "text-amber-600" : "text-emerald-600";
-                  const DeltaIcon = improving ? ArrowUpRight : delta === 0 ? Minus : ArrowDownRight;
-                  return (
-                    <div key={metric.id} className="rounded-lg border p-3 space-y-1.5">
-                      <p className="text-xs text-muted-foreground">{metric.label}</p>
-                      <p className="text-lg font-semibold tabular-nums">{formatByUnit(metric.thisWeek, metric.unit)}</p>
-                      <p className="text-xs text-muted-foreground">Last week: {formatByUnit(metric.lastWeek, metric.unit)}</p>
-                      <p className={`text-xs font-medium inline-flex items-center gap-1 ${colorClass}`}>
-                        <DeltaIcon className="h-3.5 w-3.5" />
-                        {fmtPct(Math.abs(delta))} {improving ? "improving" : "declining"}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs font-medium mb-2">Immediate action flags</p>
-                {weeklyActionFlags.length === 0 ? (
-                  <p className="text-sm text-emerald-700 inline-flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    No critical regression this week.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5 text-sm">
-                    {weeklyActionFlags.map((m) => {
-                      const critical = m.status === "critical";
-                      return (
-                        <li key={`${m.id}-flag`} className={`inline-flex items-center gap-2 ${critical ? "text-red-700" : "text-amber-700"}`}>
-                          <AlertTriangle className="h-4 w-4" />
-                          {m.label} is {fmtPct(Math.abs(m.delta))} {m.delta < 0 ? "down" : "up"} week-on-week
-                          {critical ? " (critical)" : " (watch)"}.
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ) : !weeklyError && !weeklyLoading ? (
-          <p className="text-muted-foreground text-sm">No weekly comparison data for this selection.</p>
         ) : null}
       </TabsContent>
 
@@ -1205,6 +1105,7 @@ export function DashboardClient() {
                   <thead>
                     <tr className="border-b text-left">
                       <th className="py-2 pr-4 text-muted-foreground">Partner</th>
+                      <th className="py-2 pr-4 text-muted-foreground">TPV</th>
                       <th className="py-2 pr-4 text-muted-foreground">Fee revenue</th>
                       <th className="py-2 pr-4 text-muted-foreground">Tx count</th>
                     </tr>
@@ -1213,6 +1114,7 @@ export function DashboardClient() {
                     {txPartnerRows.map((row, i) => (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                       </tr>
@@ -1561,6 +1463,7 @@ export function DashboardClient() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 text-muted-foreground align-bottom">#</th>
                     <th className="py-2 pr-4 text-muted-foreground align-bottom">Partner</th>
+                    <ThAbbr abbr="TPV" full="Total payment volume originated by this partner" />
                     <ThAbbr abbr="Fee revenue" full="Partner/network/tax fee revenue contributed by this partner" />
                     <ThAbbr abbr="Tx count" full="Successful transactions with partner fee activity" />
                     <ThAbbr abbr="Share %" full="Partner share of displayed fee pool" />
@@ -1574,6 +1477,7 @@ export function DashboardClient() {
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{i + 1}</td>
                         <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(feeRevenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtPct(sharePct)}</td>
