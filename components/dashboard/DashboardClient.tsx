@@ -785,6 +785,7 @@ export function DashboardClient() {
                 <thead>
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 text-muted-foreground">Partner</th>
+                    <th className="py-2 pr-4 text-muted-foreground">TPV</th>
                     <th className="py-2 pr-4 text-muted-foreground">Fee Revenue</th>
                     <th className="py-2 pr-4 text-muted-foreground">Tx Count</th>
                   </tr>
@@ -793,6 +794,16 @@ export function DashboardClient() {
                   {overviewPartnerRows.map((row, i) => (
                     <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                       <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardHeader>
             <CardTitle className="font-outfit">Weekly comparison</CardTitle>
