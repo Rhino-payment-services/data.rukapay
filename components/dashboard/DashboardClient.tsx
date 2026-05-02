@@ -466,7 +466,7 @@ export function DashboardClient() {
         return Number(b.transaction_count ?? 0) - Number(a.transaction_count ?? 0);
       }
       if (paSort === "name") {
-        return String(a.partner_name ?? "UNASSIGNED").localeCompare(String(b.partner_name ?? "UNASSIGNED"));
+        return String(a.partner_name ?? "").localeCompare(String(b.partner_name ?? ""));
       }
       return Number(b.partner_fee_revenue ?? 0) - Number(a.partner_fee_revenue ?? 0);
     });
@@ -792,19 +792,7 @@ export function DashboardClient() {
                 <tbody>
                   {overviewPartnerRows.map((row, i) => (
                     <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
-                      <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
-                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
-                      <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        ) : null}
-      </TabsContent>
-
-      <TabsContent value="weekly" className="space-y-6">
+                      <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
         <Card>
           <CardHeader>
             <CardTitle className="font-outfit">Weekly comparison</CardTitle>
@@ -1110,7 +1098,7 @@ export function DashboardClient() {
                   <tbody>
                     {txPartnerRows.map((row, i) => (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
-                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                       </tr>
@@ -1471,7 +1459,7 @@ export function DashboardClient() {
                     return (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{i + 1}</td>
-                        <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
+                        <td className="py-2 pr-4">{String(row.partner_name ?? "")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(feeRevenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtPct(sharePct)}</td>
