@@ -219,11 +219,20 @@ export function DashboardClient() {
   /** Partners tab */
   const [paStart, setPaStart] = useState(defaults.start);
   const [paEnd, setPaEnd] = useState(defaults.end);
-  const [paSort, setPaSort] = useState<"fee" | "count" | "name">("fee");
+  const [paSort, setPaSort] = useState<"gross" | "fee" | "count" | "name">("gross");
   const [paLimit, setPaLimit] = useState(10);
   const [partnersOverview, setPartnersOverview] = useState<Record<string, unknown> | null>(null);
   const [paLoading, setPaLoading] = useState(false);
   const [paError, setPaError] = useState<string | null>(null);
+
+  /** Customers tab */
+  const [cuStart, setCuStart] = useState(defaults.start);
+  const [cuEnd, setCuEnd] = useState(defaults.end);
+  const [cuSort, setCuSort] = useState<"gross" | "tpv" | "count">("gross");
+  const [cuLimit, setCuLimit] = useState(10);
+  const [customers, setCustomers] = useState<{ items?: Record<string, unknown>[] } | null>(null);
+  const [cuLoading, setCuLoading] = useState(false);
+  const [cuError, setCuError] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     setOvLoading(true);
@@ -408,6 +417,24 @@ export function DashboardClient() {
     }
   }, [paStart, paEnd]);
 
+  const loadCustomers = useCallback(async () => {
+    setCuLoading(true);
+    setCuError(null);
+    try {
+      const p = buildBaseSearch(cuStart, cuEnd);
+      p.set("sort_by", cuSort);
+      p.set("limit", String(Math.min(100, Math.max(1, cuLimit))));
+      p.set("offset", "0");
+      const data = await fetchAnalyticsJson<{ items?: Record<string, unknown>[] }>("customers/top", p);
+      setCustomers(data);
+    } catch (e) {
+      setCustomers(null);
+      setCuError(e instanceof Error ? e.message : "Failed to load customers");
+    } finally {
+      setCuLoading(false);
+    }
+  }, [cuStart, cuEnd, cuSort, cuLimit]);
+
   // Load when switching tabs only; use "Apply" to refetch with new filters (avoids refetch on every keystroke).
   useEffect(() => {
     if (tab === "overview") void loadOverview();
@@ -417,6 +444,7 @@ export function DashboardClient() {
     else if (tab === "wallets") void loadWallets();
     else if (tab === "merchants") void loadMerchants();
     else if (tab === "partners") void loadPartners();
+    else if (tab === "customers") void loadCustomers();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally tab-only; loaders close over latest filters
   }, [tab]);
 
@@ -431,10 +459,11 @@ export function DashboardClient() {
       else if (tab === "wallets") void loadWallets();
       else if (tab === "merchants") void loadMerchants();
       else if (tab === "partners") void loadPartners();
+      else if (tab === "customers") void loadCustomers();
     };
     const id = window.setInterval(tick, AUTO_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [tab, loadOverview, loadWeeklyComparison, loadTransactions, loadUsers, loadWallets, loadMerchants, loadPartners]);
+  }, [tab, loadOverview, loadWeeklyComparison, loadTransactions, loadUsers, loadWallets, loadMerchants, loadPartners, loadCustomers]);
 
   useEffect(() => {
     const t = loadTxTargets();
@@ -468,12 +497,15 @@ export function DashboardClient() {
       if (paSort === "name") {
         return String(a.partner_name ?? "UNASSIGNED").localeCompare(String(b.partner_name ?? "UNASSIGNED"));
       }
-      return Number(b.partner_fee_revenue ?? 0) - Number(a.partner_fee_revenue ?? 0);
+      if (paSort === "fee") {
+        return Number(b.partner_fee_revenue ?? 0) - Number(a.partner_fee_revenue ?? 0);
+      }
+      return Number(b.gross_revenue ?? 0) - Number(a.gross_revenue ?? 0);
     });
     return sorted.slice(0, Math.min(100, Math.max(1, paLimit)));
   }, [partnerTabRowsRaw, paSort, paLimit]);
-  const partnerTabTotalFeePool = useMemo(() => {
-    return partnerTabRows.reduce((acc, row) => acc + Number(row.partner_fee_revenue ?? 0), 0);
+  const partnerTabTotalGrossPool = useMemo(() => {
+    return partnerTabRows.reduce((acc, row) => acc + Number(row.gross_revenue ?? 0), 0);
   }, [partnerTabRows]);
   const activePartnerCount = overviewPartnerRows.filter((r) => {
     const amount = Number(r.partner_fee_revenue ?? 0);
@@ -635,13 +667,14 @@ export function DashboardClient() {
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 h-auto min-h-10">
+      <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 h-auto min-h-10">
         <TabsTrigger value="overview">Overview</TabsTrigger>
         <TabsTrigger value="weekly">Weekly</TabsTrigger>
         <TabsTrigger value="transactions">Transactions</TabsTrigger>
         <TabsTrigger value="users">Users</TabsTrigger>
         <TabsTrigger value="wallets">Wallets</TabsTrigger>
         <TabsTrigger value="partners">Partners</TabsTrigger>
+        <TabsTrigger value="customers">Customers</TabsTrigger>
         <TabsTrigger value="merchants">Merchants</TabsTrigger>
       </TabsList>
       <p className="text-xs text-muted-foreground">
@@ -778,7 +811,9 @@ export function DashboardClient() {
           <Card>
             <CardHeader>
               <CardTitle className="font-outfit">Partner fee breakdown</CardTitle>
-              <CardDescription>Partner-level share of non-RukaPay fee components for successful transactions.</CardDescription>
+              <CardDescription>
+                Partner-level TPV and fee revenue. Gross revenue = full fee pool (RukaPay + partner/network/tax).
+              </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -786,7 +821,8 @@ export function DashboardClient() {
                   <tr className="border-b text-left">
                     <th className="py-2 pr-4 text-muted-foreground">Partner</th>
                     <th className="py-2 pr-4 text-muted-foreground">TPV</th>
-                    <th className="py-2 pr-4 text-muted-foreground">Fee Revenue</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Gross revenue</th>
+                    <th className="py-2 pr-4 text-muted-foreground">Partner fees</th>
                     <th className="py-2 pr-4 text-muted-foreground">Tx Count</th>
                   </tr>
                 </thead>
@@ -795,6 +831,7 @@ export function DashboardClient() {
                     <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                       <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.gross_revenue)}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                       <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                     </tr>
@@ -1106,7 +1143,8 @@ export function DashboardClient() {
                     <tr className="border-b text-left">
                       <th className="py-2 pr-4 text-muted-foreground">Partner</th>
                       <th className="py-2 pr-4 text-muted-foreground">TPV</th>
-                      <th className="py-2 pr-4 text-muted-foreground">Fee revenue</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Gross revenue</th>
+                      <th className="py-2 pr-4 text-muted-foreground">Partner fees</th>
                       <th className="py-2 pr-4 text-muted-foreground">Tx count</th>
                     </tr>
                   </thead>
@@ -1115,6 +1153,7 @@ export function DashboardClient() {
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.gross_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                       </tr>
@@ -1406,10 +1445,11 @@ export function DashboardClient() {
             </div>
             <div className="space-y-2">
               <Label>Sort by</Label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {(
                   [
-                    { id: "fee" as const, label: "fee revenue" },
+                    { id: "gross" as const, label: "gross revenue" },
+                    { id: "fee" as const, label: "partner fees" },
                     { id: "count" as const, label: "tx count" },
                     { id: "name" as const, label: "name" },
                   ] as const
@@ -1453,8 +1493,15 @@ export function DashboardClient() {
             <CardHeader>
               <CardTitle className="font-outfit">Top partners</CardTitle>
               <CardDescription>
-                Sorted by {paSort === "fee" ? "fee revenue" : paSort === "count" ? "transaction count" : "name"} · top{" "}
-                {Math.min(100, Math.max(1, paLimit))}
+                Sorted by{" "}
+                {paSort === "gross"
+                  ? "gross revenue"
+                  : paSort === "fee"
+                    ? "partner fees"
+                    : paSort === "count"
+                      ? "transaction count"
+                      : "name"}{" "}
+                · top {Math.min(100, Math.max(1, paLimit))}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -1464,21 +1511,26 @@ export function DashboardClient() {
                     <th className="py-2 pr-4 text-muted-foreground align-bottom">#</th>
                     <th className="py-2 pr-4 text-muted-foreground align-bottom">Partner</th>
                     <ThAbbr abbr="TPV" full="Total payment volume originated by this partner" />
-                    <ThAbbr abbr="Fee revenue" full="Partner/network/tax fee revenue contributed by this partner" />
-                    <ThAbbr abbr="Tx count" full="Successful transactions with partner fee activity" />
-                    <ThAbbr abbr="Share %" full="Partner share of displayed fee pool" />
+                    <ThAbbr abbr="Gross revenue" full="Full fee pool (RukaPay + partner/network/tax) on successful txs" />
+                    <ThAbbr abbr="Partner fees" full="Partner/network/tax fee revenue contributed by this partner" />
+                    <ThAbbr abbr="RukaPay fees" full="RukaPay fee (rukapayFee) on successful txs for this partner" />
+                    <ThAbbr abbr="Tx count" full="Successful transactions for this partner" />
+                    <ThAbbr abbr="Share %" full="Partner share of displayed gross revenue pool" />
                   </tr>
                 </thead>
                 <tbody>
                   {partnerTabRows.map((row, i) => {
+                    const grossRevenue = Number(row.gross_revenue ?? 0);
                     const feeRevenue = Number(row.partner_fee_revenue ?? 0);
-                    const sharePct = safeRatioPct(feeRevenue, partnerTabTotalFeePool);
+                    const sharePct = safeRatioPct(grossRevenue, partnerTabTotalGrossPool);
                     return (
                       <tr key={`${String(row.partner_id ?? "na")}-${i}`} className="border-b border-border/60">
                         <td className="py-2 pr-4">{i + 1}</td>
                         <td className="py-2 pr-4">{String(row.partner_name ?? "UNASSIGNED")}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(grossRevenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtMoney(feeRevenue)}</td>
+                        <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.rukapay_fee_revenue)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
                         <td className="py-2 pr-4 tabular-nums">{fmtPct(sharePct)}</td>
                       </tr>
@@ -1490,6 +1542,113 @@ export function DashboardClient() {
           </Card>
         ) : !paError && !paLoading ? (
           <p className="text-muted-foreground text-sm">No partner activity data for this range.</p>
+        ) : null}
+      </TabsContent>
+
+      <TabsContent value="customers" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-outfit">Customer activity filters</CardTitle>
+            <CardDescription>Rank end users by gross fee revenue, TPV, or transaction count.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="cu-start">Start</Label>
+              <Input id="cu-start" type="date" value={cuStart} onChange={(e) => setCuStart(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cu-end">End</Label>
+              <Input id="cu-end" type="date" value={cuEnd} onChange={(e) => setCuEnd(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Sort by</Label>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    { id: "gross" as const, label: "gross revenue" },
+                    { id: "tpv" as const, label: "tpv" },
+                    { id: "count" as const, label: "tx count" },
+                  ] as const
+                ).map((s) => (
+                  <Button key={s.id} type="button" variant={cuSort === s.id ? "default" : "outline"} size="sm" onClick={() => setCuSort(s.id)}>
+                    {s.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cu-limit">Limit</Label>
+              <Input
+                id="cu-limit"
+                type="number"
+                min={1}
+                max={100}
+                className="w-24"
+                value={cuLimit}
+                onChange={(e) => setCuLimit(parseInt(e.target.value, 10) || 10)}
+              />
+            </div>
+            <Button type="button" onClick={() => void loadCustomers()} disabled={cuLoading}>
+              {cuLoading ? (
+                <>
+                  <Loader2 className="animate-spin" aria-hidden />
+                  Loading…
+                </>
+              ) : (
+                "Apply"
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+        {cuError ? (
+          <AnalyticsErrorAlert message={cuError} onRetry={() => void loadCustomers()} isRetrying={cuLoading} context="Customers" />
+        ) : null}
+        {cuLoading && !customers ? <MerchantsTableLoadingSkeleton /> : null}
+        {customers?.items?.length ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-outfit">Top customers</CardTitle>
+              <CardDescription>
+                Sorted by {cuSort === "gross" ? "gross revenue" : cuSort === "tpv" ? "TPV" : "transaction count"} · top{" "}
+                {Math.min(100, Math.max(1, cuLimit))}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="py-2 pr-4 text-muted-foreground align-bottom">#</th>
+                    <th className="py-2 pr-4 text-muted-foreground align-bottom">Customer</th>
+                    <ThAbbr abbr="TPV" full="Total payment volume for this customer" />
+                    <ThAbbr abbr="Gross revenue" full="Full fee pool (all fee components) on successful txs" />
+                    <ThAbbr abbr="RukaPay fees" full="RukaPay fee (rukapayFee) on successful txs" />
+                    <ThAbbr abbr="Partner fees" full="Partner/network/tax fee components" />
+                    <ThAbbr abbr="Tx count" full="Successful transactions for this customer" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.items.map((row, i) => (
+                    <tr key={`${String(row.customer_id ?? "na")}-${i}`} className="border-b border-border/60">
+                      <td className="py-2 pr-4">{(row.rank as number) ?? i + 1}</td>
+                      <td className="py-2 pr-4">
+                        <div className="font-medium">{String(row.customer_name ?? "—")}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {[row.customer_phone, row.customer_type].filter(Boolean).map(String).join(" · ") || "—"}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.tpv)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.gross_revenue)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.rukapay_fee_revenue)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtMoney(row.partner_fee_revenue)}</td>
+                      <td className="py-2 pr-4 tabular-nums">{fmtCount(row.transaction_count)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        ) : !cuError && !cuLoading ? (
+          <p className="text-muted-foreground text-sm">No customer revenue data for this range.</p>
         ) : null}
       </TabsContent>
     </Tabs>
